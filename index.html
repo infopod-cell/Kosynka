@@ -664,10 +664,10 @@ function afterAction(){
     state.autoModalShown=true;
     sfx('hint');
     showModal({kicker:'Автозавершение',title:'Всё сходится',
-      text:'Все карты открыты, а колода пуста — оставшиеся ходы однозначны. Разложить пасьянс автоматически?',
+      text:'Все карты открыты. Разложить пасьянс автоматически?',
       buttons:[
         {label:'Играть дальше'},
-        {label:'Разложить',cls:'primary',fn:autoFinish}
+        {label:'Завершить',cls:'primary',fn:autoFinish}
       ]});
     return;
   }
@@ -961,7 +961,7 @@ function checkDead(){
   showModal({kicker:'Тупик',title:'Ходов нет',
     text:'Ходов нет. Перезапустить игру?',
     buttons:[
-      {label:'Поиграть'},
+      {label:'Продолжить партию'},
       {label:'Перезапустить',cls:'primary',fn:()=>newGame(state.drawCount)}
     ]});
 }
