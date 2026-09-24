@@ -465,8 +465,8 @@ function render(){
   const wn=state.waste.length,fan=state.drawCount===3?Math.min(3,wn):1;
 state.waste.forEach((c,i)=>{
   const k=i-(wn-fan);
-  const x=P.waste.x+Math.max(0,k)*CW*0.22;
-  const y=P.waste.y-Math.max(0,k)*CH*0.03;
+  const x=P.waste.x-Math.max(0,fan-1-k)*CW*0.25;
+  const y=P.waste.y-Math.max(0,fan-1-k)*CH*0.04;
   place(c,x,y,i);
 });
   state.found.forEach((f,fi)=>f.forEach((c,i)=>place(c,P.found[fi].x,P.found[fi].y,i)));
