@@ -346,24 +346,24 @@ function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;
    в центре — очень крупная масть (66% ширины карты, у туза 74%).
    Широкие знаки (A, J, Q, K, «10») слегка сжаты по горизонтали,
    чтобы масть помещалась рядом; кегль у всех рангов одинаковый. */
-function faceSVG(suit,rank){
-  const color=isRed(suit)?'var(--red)':'var(--ink)';
-  const rtxt=RANK_TXT[rank];
-  let corner;
-  if(rtxt==='10'){
-    corner=`<text class="rt" x="0" y="38" letter-spacing="-3" transform="translate(17 0) scale(0.8 1)">10</text>`+
-           `<use href="#su-${suit}" x="36" y="8" width="19" height="19"/>`;
-  }else if(rank===1||rank>10){
-    corner=`<text class="rt" x="0" y="38" transform="translate(14 0) scale(0.85 1)">${rtxt}</text>`+
-           `<use href="#su-${suit}" x="30" y="6" width="24" height="24"/>`;
-  }else{
-    corner=`<text class="rt" x="14" y="38">${rtxt}</text>`+
-           `<use href="#su-${suit}" x="30" y="6" width="24" height="24"/>`;
-  }
-  const size=rank===1?74:66;
-  const inner=corner+
-    `<use href="#su-${suit}" x="${(100-size)/2}" y="${(140-size)/2}" width="${size}" height="${size}"/>`;
-  return `<svg class="face-svg" viewBox="0 0 100 140" style="color:${color}" aria-hidden="true">${inner}</svg>`;
+function faceSVG(suit, rank) {
+  const color = isRed(suit) ? 'var(--red)' : 'var(--ink)';
+  const rtxt = RANK_TXT[rank];
+  
+  // ДОСТОИНСТВО (левый верхний угол) — ОЧЕНЬ КРУПНО
+  const rankX = (rtxt === '10') ? 5 : 10;
+  const rankText = `<text x="${rankX}" y="38" font-size="38" font-weight="900" text-anchor="start" fill="currentColor" style="font-family: 'Playfair Display', serif;">${rtxt}</text>`;
+  
+  // МАСТЬ (правый верхний угол) — КРУПНО
+  const cornerSuit = `<use href="#su-${suit}" x="68" y="5" width="30" height="30" fill="currentColor"/>`;
+  
+  // МАСТЬ (центр) — ОЧЕНЬ КРУПНО
+  const centerSize = (rank === 1) ? 72 : 66;
+  const cx = (100 - centerSize) / 2;
+  const cy = (140 - centerSize) / 2;
+  const centerSuit = `<use href="#su-${suit}" x="${cx}" y="${cy}" width="${centerSize}" height="${centerSize}" fill="currentColor"/>`;
+  
+  return `<svg class="face-svg" viewBox="0 0 100 140" style="color:${color}" aria-hidden="true">${rankText}${cornerSuit}${centerSuit}</svg>`;
 }
 
 /* ================== ПОСТРОЕНИЕ ПОЛЯ ================== */
