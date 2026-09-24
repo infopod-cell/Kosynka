@@ -1045,8 +1045,8 @@ function showModal({kicker,title,text,buttons,petals}){
 }
 function hideModal(){overlay.classList.remove('show');}
 function showWinModal(){
-  showModal({kicker:'Партия завершена',title:'Пасьянс сошёлся!',petals:true,
-    text:`Собраны все четыре масти от туза до короля.<br>Время — ${fmt(state.seconds)} · Ходы — ${state.moves}`,
+  showModal({kicker:'Партия завершена',title:'Победа!',petals:true,
+    text:`Время — ${fmt(state.seconds)} · Ходы — ${state.moves}`,
     buttons:[
       {label:'Сыграть ещё',cls:'primary',fn:()=>newGame(state.drawCount)},
       {label:'На главную',fn:goHome}
