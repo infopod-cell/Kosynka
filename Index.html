@@ -146,7 +146,7 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 
 .card{position:absolute;left:0;top:0;width:var(--cw,120px);height:var(--ch,170px);
   transition:transform .42s cubic-bezier(.22,.75,.25,1);
-  will-change:transform;cursor:default}
+  will-change:transform;transform-origin:left top;cursor:default}
 .card.can{cursor:pointer}
 .card.can:hover{--ty:-3px}
 .card.noanim,.card.drag{transition:none}
