@@ -468,8 +468,8 @@ state.waste.forEach((c,i)=>{
   if(k<=0){
     place(c,P.waste.x,P.waste.y,i);
   }else{
-    const x=P.waste.x-(fan-k)*CW*0.22;
-    const y=P.waste.y-(fan-k)*CH*0.04;
+    const x=P.waste.x-(fan-k+1)*CW*0.5;
+    const y=P.waste.y-(fan-k)*CH*0.05;
     place(c,x,y,i);
   }
 });
