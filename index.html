@@ -151,6 +151,8 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 /* noflip: глушит только анимацию переворота, скольжение остаётся */
 .card.noflip .inner{transition:none}
 .card.drag{cursor:grabbing}
+/* flat: карта лежит в колоде — без тени, чтобы под стопкой не было тёмного пятна */
+.card.flat .face{box-shadow:none}
 .lift,.inner,.face{pointer-events:none}
 .lift{position:absolute;left:0;top:0;right:0;bottom:0;
   transform:scale(var(--s,1)) rotate(var(--tilt,0deg)) translateY(var(--ty,0px));
@@ -330,8 +332,8 @@ const state={drawCount:1,stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],
   moves:0,seconds:0,busy:false,finished:false,autoModalShown:false};
 let undoStack=[],lastReal=null;
 let moveTags=new Set();
-/* защита подсказки от зацикливания на сдачах */
 let fruitlessRecycles=0,movesSinceRecycle=0;
+let deadShown=false; /* окно «Ходов нет» уже показано для текущего тупика */
 let timerInt=null,pending=[];
 let CW=100,CH=142,P={};
 let slotEls={};
@@ -390,9 +392,7 @@ function buildBoard(){
 }
 const slotKey=ref=>ref.k==='found'?'f'+ref.i:ref.k==='tab'?'t'+ref.i:ref.k;
 
-/* ================== РАСКЛАДКА ==================
-   Верхний ряд: дома (0–3) · пусто (4) · сброс (5) · КОЛОДА (6).
-   Отступы сверху/по бокам с запасом под свечение подсказки. */
+/* ================== РАСКЛАДКА ================== */
 function layout(){
   const bwRaw=boardEl.clientWidth,bh=boardEl.clientHeight;
   if(bwRaw<50||bh<80){
@@ -461,6 +461,7 @@ function tabOffsets(i){
 }
 function render(){
   if(!layoutOK)return;
+  const inStock=new Set(state.stock);
   state.stock.forEach((c,i)=>place(c,P.stock.x,P.stock.y,i));
   const wn=state.waste.length,fan=state.drawCount===3?Math.min(3,wn):1;
   state.waste.forEach((c,i)=>{
@@ -479,10 +480,10 @@ function render(){
     let y=P.tab[ti].y;
     t.forEach((c,i)=>{place(c,P.tab[ti].x,y,i);y+=c.faceUp?u:d;});
   });
+  /* картам в колоде — без тени (иначе слои теней дают тёмный край под стопкой) */
+  deck.forEach(c=>c.el.classList.toggle('flat',inStock.has(c)));
   deck.forEach(c=>c.el.classList.toggle('can',canPick(c)));
 }
-/* скольжение карт к новым местам (без всяких теней —
-   класс .air удалён из игры полностью) */
 function fly(cards){
   cards.forEach((c,i)=>{c._z=1000+i;c.el.style.zIndex=1000+i;});
   later(()=>{
@@ -490,13 +491,11 @@ function fly(cards){
     render();
   },470);
 }
-/* мгновенное перемещение без каких-либо анимаций
-   (возврат колоды из сброса, отмена сдачи/цикла) */
 function snapCards(cards){
   const els=cards.map(c=>c.el);
   els.forEach(el=>el.classList.add('noanim','noflip'));
   render();
-  void boardEl.offsetHeight; /* фиксируем конечное состояние до снятия классов */
+  void boardEl.offsetHeight;
   later(()=>els.forEach(el=>el.classList.remove('noanim','noflip')),80);
 }
 
@@ -539,7 +538,7 @@ const arrOf=p=>{
 };
 const pkey=ref=>ref.k==='tab'?'t'+ref.i:ref.k==='found'?'f'+ref.i:ref.k;
 
-/* ================== ОТМЕНА: ОБРАТИМЫЕ ОПЕРАЦИИ ================== */
+/* ================== ОТМЕНА ================== */
 function recordMove(rec){undoStack.push(rec);if(undoStack.length>400)undoStack.shift();}
 function pileByRef(k,i){
   if(k==='stock')return state.stock;
@@ -600,6 +599,7 @@ function undo(){
     const r=undoStack.pop();
     if(applyInverse(r)){
       lastReal=null;
+      deadShown=false; /* позиция изменилась — окно тупика может показаться снова */
       setAutoVisible(!state.finished&&canAutoFinish());
       return;
     }
@@ -626,6 +626,7 @@ function moveGroup(cards,fromRef,toRef){
   lastReal={id:topId,from:fk,to:tk};
   state.moves++;
   movesSinceRecycle++;fruitlessRecycles=0;
+  deadShown=false; /* позиция изменилась */
   render();fly(cards);sfx('place');
   updateHUD();afterAction();
 }
@@ -635,9 +636,6 @@ function drawStock(){
   if(state.stock.length){
     const n=Math.min(state.drawCount,state.stock.length);
     const cards=state.stock.splice(state.stock.length-n,n);
-    /* карты выезжают из колоды уже открытыми: переворот происходит
-       мгновенно в момент старта (глазом не виден), дальше — только
-       скольжение с обычной тенью карты. Никаких классов-теней. */
     cards.forEach(c=>{c.el.classList.add('noflip');c.faceUp=true;});
     state.waste.push(...cards);
     recordMove({t:'d',n});
@@ -654,7 +652,6 @@ function drawStock(){
     if(movesSinceRecycle===0)fruitlessRecycles++;
     else fruitlessRecycles=0;
     movesSinceRecycle=0;
-    /* возврат в колоду — строго мгновенно: ни полёта, ни переворота, ни тени */
     snapCards(state.stock.slice());
     sfx('flip');
     updateHUD();afterAction();
@@ -672,7 +669,9 @@ function afterAction(){
         {label:'Играть дальше'},
         {label:'Разложить',cls:'primary',fn:autoFinish}
       ]});
+    return;
   }
+  checkDead();
 }
 
 /* ================== ГЕОМЕТРИЧЕСКОЕ ОПРЕДЕЛЕНИЕ КЛИКА ================== */
@@ -842,11 +841,7 @@ function findDropTarget(cards,cx,cy){
   return best;
 }
 
-/* ================== ПОДСКАЗКА ==================
-   Приоритет: фундамент → открытие закрытой карты → освобождение колонки →
-   карта из сброса → колода. Ходы-перестановки не предлагаются;
-   уже сделанные ходы исключены; бесплодные циклы сдач не предлагаются.
-   Если новых ходов нет — «Нет ходов». */
+/* ================== ПОДСКАЗКА И ДИАГНОСТИКА ТУПИКА ================== */
 function listMoves(){
   const res=[];
   const wt=state.waste[state.waste.length-1];
@@ -900,16 +895,10 @@ function anyUnbannedDrawValue(){
   }
   return false;
 }
-let hintEls=[],hintTimer=null;
-function clearHint(){
-  if(hintTimer){clearTimeout(hintTimer);hintTimer=null;}
-  hintEls.forEach(el=>el.classList.remove('hint'));hintEls=[];
-}
-function hint(){
-  if(state.busy||state.finished)return;
-  clearHint();
+/* общий поиск лучшего доступного хода — им пользуются и подсказка,
+   и автоматическое окно «Ходов нет» (гарантия одинакового поведения) */
+function findHintMove(){
   const all=listMoves().sort((a,b)=>b.sc-a.sc);
-  let chosen=null;
   for(const mv of all){
     if(mv.kind)continue;
     const safe=mv.dst.k==='found'||mv.flips;
@@ -922,15 +911,33 @@ function hint(){
         if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
       }
     }
-    chosen=mv;break;
+    return mv;
   }
+  return null;
+}
+function noMovesLeft(){
+  if(findHintMove())return false;
+  const hasStock=state.stock.length>0;
+  const hasRecycle=!hasStock&&state.waste.length>0;
+  if((hasStock||hasRecycle)&&fruitlessRecycles===0&&anyUnbannedDrawValue())return false;
+  return true;
+}
+let hintEls=[],hintTimer=null;
+function clearHint(){
+  if(hintTimer){clearTimeout(hintTimer);hintTimer=null;}
+  hintEls.forEach(el=>el.classList.remove('hint'));hintEls=[];
+}
+function hint(){
+  if(state.busy||state.finished)return;
+  clearHint();
+  const chosen=findHintMove();
   if(chosen){
     chosen.src.forEach(c=>hintEls.push(c.el));
     const dst=arrOf(chosen.dst);
     hintEls.push(dst.length?dst[dst.length-1].el:slotEls[slotKey(chosen.dst)]);
   }else{
-    const hasStock=all.some(m=>m.kind==='stock');
-    const hasRecycle=all.some(m=>m.kind==='recycle');
+    const hasStock=allKind(listMoves(),'stock');
+    const hasRecycle=allKind(listMoves(),'recycle');
     if((hasStock||hasRecycle)&&fruitlessRecycles===0&&anyUnbannedDrawValue()){
       hintEls.push(slotEls.stock);
       toast(hasStock?'Возьмите карты из колоды':'Соберите колоду заново из сброса');
@@ -941,6 +948,22 @@ function hint(){
   }
   hintEls.forEach(el=>el.classList.add('hint'));
   hintTimer=setTimeout(clearHint,2100);
+}
+function allKind(moves,kind){return moves.some(m=>m.kind===kind);}
+
+/* автоматическое окно «Ходов нет» — та же диагностика, что у подсказки */
+function checkDead(){
+  if(deadShown||state.finished||state.busy)return;
+  if(canAutoFinish())return; /* доступно автозавершение — это не тупик */
+  if(!noMovesLeft())return;
+  deadShown=true;
+  sfx('hint');
+  showModal({kicker:'Тупик',title:'Ходов нет',
+    text:'Ходов нет. Перезапустить игру?',
+    buttons:[
+      {label:'Поиграть'},
+      {label:'Перезапустить',cls:'primary',fn:()=>newGame(state.drawCount)}
+    ]});
 }
 
 /* ================== АВТОЗАВЕРШЕНИЕ И ПОБЕДА ================== */
@@ -1129,7 +1152,7 @@ function startDeal(){
     later(()=>{p.c.faceUp=true;place(p.c,p.c.x,p.c.y,p.c.z);sfx('flip');},p.d+300));
   later(()=>{
     deck.forEach(c=>{c._z=null;c.el.style.transitionDelay='';});
-    state.busy=false;render();startTimer();
+    state.busy=false;render();startTimer();checkDead();
   },k*32+620);
 }
 function newGame(dc){
@@ -1138,7 +1161,7 @@ function newGame(dc){
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
   undoStack=[];lastReal=null;moveTags.clear();
-  fruitlessRecycles=0;movesSinceRecycle=0;
+  fruitlessRecycles=0;movesSinceRecycle=0;deadShown=false;
   state.drawCount=dc;state.moves=0;state.seconds=0;
   state.finished=false;state.autoModalShown=false;state.busy=true;
   stopTimer();updateHUD();
@@ -1159,7 +1182,7 @@ function goHome(){
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
   undoStack=[];lastReal=null;moveTags.clear();
-  fruitlessRecycles=0;movesSinceRecycle=0;
+  fruitlessRecycles=0;movesSinceRecycle=0;deadShown=false;
   stopTimer();state.busy=false;
   setAutoVisible(false);
   gameEl.classList.add('off');
