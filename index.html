@@ -7,7 +7,7 @@
 <title>Косынка — классический пасьянс</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800;900&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --gold:#d3b06c; --gold-soft:rgba(211,176,108,.55);
@@ -73,7 +73,6 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 #menu .modes{animation:rise .7s .42s both}
 #menu .menu-hint{animation:rise .6s .6s both}
 
-/* телефон: компактный главный экран, блоки в две колонки */
 @media(max-width:700px){
   .fl{opacity:.12}
   #menu{padding:18px 14px}
@@ -111,7 +110,6 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 /* ================= ИГРА ================= */
 #game{display:flex;flex-direction:column}
 
-/* верхняя полоска: звук + счётчики */
 #topbar{display:flex;align-items:center;gap:10px;
   padding:calc(8px + env(safe-area-inset-top)) 14px 6px}
 .tb-side{flex:1;display:flex;align-items:center}
@@ -150,6 +148,8 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 .card.can{cursor:pointer}
 .card.can:hover{--ty:-3px}
 .card.noanim,.card.drag{transition:none}
+/* noflip: глушит только анимацию переворота, скольжение остаётся */
+.card.noflip .inner{transition:none}
 .card.drag{cursor:grabbing}
 .lift,.inner,.face{pointer-events:none}
 .lift{position:absolute;left:0;top:0;right:0;bottom:0;
@@ -170,18 +170,22 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 .front{background:#fbf8ef;border:1px solid #d6cfbd;box-shadow:0 2px 5px rgba(7,20,13,.45)}
 .face.back{transform:rotateY(180deg);border-radius:var(--cr,10px);box-shadow:0 2px 5px rgba(7,20,13,.45)}
 .face-svg{width:100%;height:100%;display:block}
-/* ранг: крупный, только в левом верхнем углу */
-.face-svg .rt{font-family:'Playfair Display',serif;font-weight:900;
-  font-size:38px;text-anchor:middle;fill:currentColor}
-.card.air .face{box-shadow:0 16px 32px rgba(5,16,10,.5)}
-.card.hint .front,.slot.hint{animation:hintPulse .8s ease-in-out 3}
+
+/* подсветка подсказки: карты */
+.card.hint .front{animation:hintPulse .8s ease-in-out 3}
 @keyframes hintPulse{
   0%,100%{box-shadow:0 0 20px rgba(0,200,255,.8),0 0 40px rgba(0,200,255,.4)}
   50%{box-shadow:0 0 30px rgba(0,220,255,1),0 0 50px rgba(0,200,255,.6)}
 }
+/* подсветка слотов (колода/пустой дом): кольцо + компактное свечение */
+.slot.hint{animation:slotHintPulse .8s ease-in-out 3}
+@keyframes slotHintPulse{
+  0%,100%{box-shadow:0 0 0 2px rgba(0,220,255,.9),0 0 10px rgba(0,205,255,.75),0 0 18px rgba(0,200,255,.4)}
+  50%{box-shadow:0 0 0 2px rgba(0,235,255,1),0 0 14px rgba(0,215,255,.95),0 0 20px rgba(0,205,255,.6)}
+}
 .card.absorb{transition:transform .5s cubic-bezier(.5,0,.9,.4),opacity .4s ease-in .1s;opacity:0}
 
-/* ================= НИЖНЯЯ ПАНЕЛЬ (симметричная сетка) ================= */
+/* ================= НИЖНЯЯ ПАНЕЛЬ ================= */
 #toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;
   width:100%;max-width:660px;margin:0 auto;
   padding:9px 14px calc(10px + env(safe-area-inset-bottom));
@@ -325,6 +329,9 @@ let deck=[];
 const state={drawCount:1,stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],[],[],[]],
   moves:0,seconds:0,busy:false,finished:false,autoModalShown:false};
 let undoStack=[],lastReal=null;
+let moveTags=new Set();
+/* защита подсказки от зацикливания на сдачах */
+let fruitlessRecycles=0,movesSinceRecycle=0;
 let timerInt=null,pending=[];
 let CW=100,CH=142,P={};
 let slotEls={};
@@ -341,29 +348,21 @@ function buildDeck(){
 }
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]];}}
 
-/* ================== ЛИЦО КАРТЫ (SVG) ==================
-   Крупный ранг в левом верхнем углу + масть рядом (верхняя полоса
-   карты самодостаточна: видна при перекрытии и в веере «по три»),
-   в центре — очень крупная масть (66% ширины карты, у туза 74%).
-   Широкие знаки (A, J, Q, K, «10») слегка сжаты по горизонтали,
-   чтобы масть помещалась рядом; кегль у всех рангов одинаковый. */
+/* ================== ЛИЦО КАРТЫ (SVG) ================== */
 function faceSVG(suit, rank) {
   const color = isRed(suit) ? 'var(--red)' : 'var(--ink)';
   const rtxt = RANK_TXT[rank];
-  
-  // ДОСТОИНСТВО (левый верхний угол) — ОЧЕНЬ КРУПНО
+
   const rankX = (rtxt === '10') ? 5 : 10;
   const rankText = `<text x="${rankX}" y="28" font-size="34" font-weight="900" text-anchor="start" fill="currentColor" style="font-family: 'Playfair Display', serif;">${rtxt}</text>`;
-  
-  // МАСТЬ (правый верхний угол) — КРУПНО
+
   const cornerSuit = `<use href="#su-${suit}" x="68" y="5" width="30" height="30" fill="currentColor"/>`;
-  
-  // МАСТЬ (центр) — ОЧЕНЬ КРУПНО
+
   const centerSize = (rank === 1) ? 72 : 66;
   const cx = (100 - centerSize) / 2;
   const cy = (140 - centerSize) / 2;
   const centerSuit = `<use href="#su-${suit}" x="${cx}" y="${cy}" width="${centerSize}" height="${centerSize}" fill="currentColor"/>`;
-  
+
   return `<svg class="face-svg" viewBox="0 0 100 140" style="color:${color}" aria-hidden="true">${rankText}${cornerSuit}${centerSuit}</svg>`;
 }
 
@@ -392,7 +391,8 @@ function buildBoard(){
 const slotKey=ref=>ref.k==='found'?'f'+ref.i:ref.k==='tab'?'t'+ref.i:ref.k;
 
 /* ================== РАСКЛАДКА ==================
-   Верхний ряд: дома (0–3) · пусто (4) · сброс (5) · КОЛОДА (6) */
+   Верхний ряд: дома (0–3) · пусто (4) · сброс (5) · КОЛОДА (6).
+   Отступы сверху/по бокам с запасом под свечение подсказки. */
 function layout(){
   const bwRaw=boardEl.clientWidth,bh=boardEl.clientHeight;
   if(bwRaw<50||bh<80){
@@ -406,13 +406,15 @@ function layout(){
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   layoutTries=0;
   const bw=Math.min(bwRaw,1100);
-  const pad=Math.max(8,bw*0.014);
+  const pad=Math.max(20,bw*0.02);
   let gap=Math.max(5,bw*0.014);
   let cw=(bw-pad*2-gap*6)/7;
   const chMax=(bh/2.55)/1.42;
   if(cw>chMax){cw=chMax;gap=Math.max(4,(bw-pad*2-7*cw)/6);}
   const ch=cw*1.42;CW=cw;CH=ch;
-  const fieldW=7*cw+6*gap,ox=(bwRaw-fieldW)/2,oy=Math.max(8,bh*0.018);
+  const fieldW=7*cw+6*gap,ox=(bwRaw-fieldW)/2;
+  const fanLift=state.drawCount===3?ch*0.085:0;
+  const oy=Math.max(24,bh*0.034)+fanLift;
   P.found=[0,1,2,3].map(i=>({x:ox+i*(cw+gap),y:oy}));
   P.waste={x:ox+5*(cw+gap),y:oy};
   P.stock={x:ox+6*(cw+gap),y:oy};
@@ -460,22 +462,17 @@ function tabOffsets(i){
 function render(){
   if(!layoutOK)return;
   state.stock.forEach((c,i)=>place(c,P.stock.x,P.stock.y,i));
-  /* веер «по три»: сдвиг — максимально возможный, при котором веер
-     не наезжает на 4-й дом; на телефоне это ~60% ширины карты,
-     поэтому ранг и масть видны на КАЖДОЙ из трёх сданных карт */
   const wn=state.waste.length,fan=state.drawCount===3?Math.min(3,wn):1;
-state.waste.forEach((c,i)=>{
-  if(i < wn - fan){
-    // Карты под веером — лежат стопкой в одной позиции
-    place(c,P.waste.x,P.waste.y,i);
-  }else{
-    // Последние 3 карты — веером слева направо
-    const fanIndex = i - (wn - fan);
-    const x=P.waste.x - (fan - 1 - fanIndex)*CW*0.22;
-    const y=P.waste.y - (fan - 1 - fanIndex)*CH*0.04;
-    place(c,x,y,i);
-  }
-});
+  state.waste.forEach((c,i)=>{
+    if(i < wn - fan){
+      place(c,P.waste.x,P.waste.y,i);
+    }else{
+      const fanIndex = i - (wn - fan);
+      const x=P.waste.x - (fan - 1 - fanIndex)*CW*0.22;
+      const y=P.waste.y - (fan - 1 - fanIndex)*CH*0.04;
+      place(c,x,y,i);
+    }
+  });
   state.found.forEach((f,fi)=>f.forEach((c,i)=>place(c,P.found[fi].x,P.found[fi].y,i)));
   state.tab.forEach((t,ti)=>{
     const{d,u}=tabOffsets(ti);
@@ -484,12 +481,23 @@ state.waste.forEach((c,i)=>{
   });
   deck.forEach(c=>c.el.classList.toggle('can',canPick(c)));
 }
+/* скольжение карт к новым местам (без всяких теней —
+   класс .air удалён из игры полностью) */
 function fly(cards){
-  cards.forEach((c,i)=>{c._z=1000+i;c.el.classList.add('air');c.el.style.zIndex=1000+i;});
+  cards.forEach((c,i)=>{c._z=1000+i;c.el.style.zIndex=1000+i;});
   later(()=>{
-    cards.forEach(c=>{c._z=null;c.el.classList.remove('air');});
+    cards.forEach(c=>{c._z=null;});
     render();
   },470);
+}
+/* мгновенное перемещение без каких-либо анимаций
+   (возврат колоды из сброса, отмена сдачи/цикла) */
+function snapCards(cards){
+  const els=cards.map(c=>c.el);
+  els.forEach(el=>el.classList.add('noanim','noflip'));
+  render();
+  void boardEl.offsetHeight; /* фиксируем конечное состояние до снятия классов */
+  later(()=>els.forEach(el=>el.classList.remove('noanim','noflip')),80);
 }
 
 /* ================== ПРАВИЛА ================== */
@@ -551,7 +559,15 @@ function applyInverse(r){
     const seg=to.splice(to.length-r.n,r.n);
     if(r.fl&&from.length)from[from.length-1].faceUp=false;
     from.push(...seg);
+    if(r.id!=null){
+      const k1=r.fk==='tab'?'t'+r.fi:r.fk==='found'?'f'+r.fi:r.fk;
+      const k2=r.tk==='tab'?'t'+r.ti:r.tk==='found'?'f'+r.ti:r.tk;
+      moveTags.delete(r.id+'|'+k1+'|'+k2);
+      moveTags.delete(r.id+'|'+k2+'|'+k1);
+    }
     state.moves=Math.max(0,state.moves-1);
+    movesSinceRecycle=Math.max(0,movesSinceRecycle-1);
+    fruitlessRecycles=0;
     updateHUD();render();fly(seg);sfx('flip');
     return true;
   }
@@ -561,7 +577,7 @@ function applyInverse(r){
     seg.forEach(c=>c.faceUp=false);
     state.stock.push(...seg);
     state.moves=Math.max(0,state.moves-1);
-    updateHUD();render();fly(seg);sfx('flip');
+    updateHUD();snapCards(seg);sfx('flip');
     return true;
   }
   if(r.t==='r'){
@@ -571,7 +587,8 @@ function applyInverse(r){
     seg.forEach(c=>c.faceUp=true);
     state.waste=seg;
     state.moves=Math.max(0,state.moves-1);
-    updateHUD();render();sfx('flip');
+    fruitlessRecycles=Math.max(0,fruitlessRecycles-1);
+    updateHUD();snapCards(seg);sfx('flip');
     return true;
   }
   return false;
@@ -601,9 +618,14 @@ function moveGroup(cards,fromRef,toRef){
   to.push(...cards);
   const willFlip=fromRef.k==='tab'&&from.length>0&&!from[from.length-1].faceUp;
   if(willFlip)from[from.length-1].faceUp=true;
-  recordMove({t:'m',fk:fromRef.k,fi:fromRef.i|0,tk:toRef.k,ti:toRef.i|0,n:cards.length,fl:willFlip?1:0});
-  lastReal={id:cards[cards.length-1].id,from:pkey(fromRef),to:pkey(toRef)};
+  const topId=cards[cards.length-1].id;
+  recordMove({t:'m',fk:fromRef.k,fi:fromRef.i|0,tk:toRef.k,ti:toRef.i|0,n:cards.length,fl:willFlip?1:0,id:topId});
+  const fk=pkey(fromRef),tk=pkey(toRef);
+  moveTags.add(topId+'|'+fk+'|'+tk);
+  moveTags.add(topId+'|'+tk+'|'+fk);
+  lastReal={id:topId,from:fk,to:tk};
   state.moves++;
+  movesSinceRecycle++;fruitlessRecycles=0;
   render();fly(cards);sfx('place');
   updateHUD();afterAction();
 }
@@ -613,18 +635,28 @@ function drawStock(){
   if(state.stock.length){
     const n=Math.min(state.drawCount,state.stock.length);
     const cards=state.stock.splice(state.stock.length-n,n);
-    cards.forEach(c=>c.faceUp=true);
+    /* карты выезжают из колоды уже открытыми: переворот происходит
+       мгновенно в момент старта (глазом не виден), дальше — только
+       скольжение с обычной тенью карты. Никаких классов-теней. */
+    cards.forEach(c=>{c.el.classList.add('noflip');c.faceUp=true;});
     state.waste.push(...cards);
     recordMove({t:'d',n});
     lastReal={type:'draw'};
     state.moves++;render();fly(cards);sfx('flip');
+    later(()=>cards.forEach(c=>c.el.classList.remove('noflip')),90);
     updateHUD();afterAction();
   }else if(state.waste.length){
     const n=state.waste.length;
     while(state.waste.length){const c=state.waste.pop();c.faceUp=false;state.stock.push(c);}
     recordMove({t:'r',n});
     lastReal={type:'recycle'};
-    state.moves++;render();fly(state.stock.slice());sfx('flip');
+    state.moves++;
+    if(movesSinceRecycle===0)fruitlessRecycles++;
+    else fruitlessRecycles=0;
+    movesSinceRecycle=0;
+    /* возврат в колоду — строго мгновенно: ни полёта, ни переворота, ни тени */
+    snapCards(state.stock.slice());
+    sfx('flip');
     updateHUD();afterAction();
   }
 }
@@ -810,7 +842,11 @@ function findDropTarget(cards,cx,cy){
   return best;
 }
 
-/* ================== ПОДСКАЗКА: ТОЛЬКО ПРОДУКТИВНЫЕ ХОДЫ ================== */
+/* ================== ПОДСКАЗКА ==================
+   Приоритет: фундамент → открытие закрытой карты → освобождение колонки →
+   карта из сброса → колода. Ходы-перестановки не предлагаются;
+   уже сделанные ходы исключены; бесплодные циклы сдач не предлагаются.
+   Если новых ходов нет — «Нет ходов». */
 function listMoves(){
   const res=[];
   const wt=state.waste[state.waste.length-1];
@@ -835,15 +871,15 @@ function listMoves(){
         if(k===ti)continue;
         if(!canDropOnTab(c,k))continue;
         if(empties&&c.rank===13&&state.tab[k].length===0)continue;
-        res.push({sc:flips?80:30,src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti});
+        res.push({sc:flips?80:30,src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti,flips:flips?1:0});
         break;
       }
     }
   });
-  if(wt&&!state.stock.length){
+  if(wt){
     for(let k=0;k<7;k++){
       if(canDropOnTab(wt,k)&&!(state.tab[k].length===0&&wt.rank===13)){
-        res.push({sc:10,src:[wt],dst:{k:'tab',i:k},from:'waste'});
+        res.push({sc:state.stock.length?40:10,src:[wt],dst:{k:'tab',i:k},from:'waste'});
         break;
       }
     }
@@ -852,11 +888,15 @@ function listMoves(){
   else if(state.waste.length)res.push({kind:'recycle',sc:6});
   return res;
 }
-function anyCardPlayable(){
-  const seq=[...state.stock].reverse().concat([...state.waste].reverse());
+function anyUnbannedDrawValue(){
+  const seq=[...state.stock].reverse();
+  for(let i=state.waste.length-1;i>=0;i--)seq.push(state.waste[i]);
   for(const c of seq){
     if(foundFor(c)>=0)return true;
-    for(let k=0;k<7;k++)if(canDropOnTab(c,k))return true;
+    for(let k=0;k<7;k++){
+      if(canDropOnTab(c,k)&&!(state.tab[k].length===0&&c.rank===13)
+         &&!moveTags.has(c.id+'|waste|t'+k))return true;
+    }
   }
   return false;
 }
@@ -872,11 +912,15 @@ function hint(){
   let chosen=null;
   for(const mv of all){
     if(mv.kind)continue;
-    const top=mv.src[mv.src.length-1];
-    const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
-    if(lastReal&&lastReal.id!=null){
-      if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
-      if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
+    const safe=mv.dst.k==='found'||mv.flips;
+    if(!safe){
+      const top=mv.src[mv.src.length-1];
+      const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
+      if(moveTags.has(tag))continue;
+      if(lastReal&&lastReal.id!=null){
+        if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
+        if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
+      }
     }
     chosen=mv;break;
   }
@@ -887,14 +931,11 @@ function hint(){
   }else{
     const hasStock=all.some(m=>m.kind==='stock');
     const hasRecycle=all.some(m=>m.kind==='recycle');
-    if((hasStock||hasRecycle)&&!anyCardPlayable()){
-      toast('Ходов больше нет — ни одна из оставшихся карт никуда не ложится');
-      return;
-    }
-    if(hasStock){hintEls.push(slotEls.stock);toast('Возьмите карты из колоды');}
-    else if(hasRecycle){hintEls.push(slotEls.stock);toast('Соберите колоду заново из сброса');}
-    else{
-      toast('Ходов нет — отмените последний ход или начните новую раздачу');
+    if((hasStock||hasRecycle)&&fruitlessRecycles===0&&anyUnbannedDrawValue()){
+      hintEls.push(slotEls.stock);
+      toast(hasStock?'Возьмите карты из колоды':'Соберите колоду заново из сброса');
+    }else{
+      toast('Нет ходов');
       return;
     }
   }
@@ -941,7 +982,7 @@ function autoFinish(){
     state.found[fi].push(mv.c);
     state.moves++;updateHUD();
     render();
-    mv.c.el.style.zIndex=1500;mv.c.el.classList.add('air');
+    mv.c.el.style.zIndex=1500;
     const sl=slotEls['f'+fi];
     sl.classList.add('gulp');setTimeout(()=>sl.classList.remove('gulp'),380);
     sfx('gulp');
@@ -1096,7 +1137,8 @@ function newGame(dc){
   if(autoTimer){clearTimeout(autoTimer);autoTimer=null;}
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
-  undoStack=[];lastReal=null;
+  undoStack=[];lastReal=null;moveTags.clear();
+  fruitlessRecycles=0;movesSinceRecycle=0;
   state.drawCount=dc;state.moves=0;state.seconds=0;
   state.finished=false;state.autoModalShown=false;state.busy=true;
   stopTimer();updateHUD();
@@ -1116,7 +1158,8 @@ function goHome(){
   if(autoTimer){clearTimeout(autoTimer);autoTimer=null;}
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
-  undoStack=[];lastReal=null;
+  undoStack=[];lastReal=null;moveTags.clear();
+  fruitlessRecycles=0;movesSinceRecycle=0;
   stopTimer();state.busy=false;
   setAutoVisible(false);
   gameEl.classList.add('off');
