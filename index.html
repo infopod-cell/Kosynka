@@ -464,12 +464,14 @@ function render(){
      поэтому ранг и масть видны на КАЖДОЙ из трёх сданных карт */
   const wn=state.waste.length,fan=state.drawCount===3?Math.min(3,wn):1;
 state.waste.forEach((c,i)=>{
-  const k=i-(wn-fan);
-  if(k<=0){
+  if(i < wn - fan){
+    // Карты под веером — лежат стопкой в одной позиции
     place(c,P.waste.x,P.waste.y,i);
   }else{
-    const x=P.waste.x-(fan-k+1)*CW*0.5;
-    const y=P.waste.y-(fan-k)*CH*0.05;
+    // Последние 3 карты — веером слева направо
+    const fanIndex = i - (wn - fan);
+    const x=P.waste.x - (fan - 1 - fanIndex)*CW*0.22;
+    const y=P.waste.y - (fan - 1 - fanIndex)*CH*0.04;
     place(c,x,y,i);
   }
 });
