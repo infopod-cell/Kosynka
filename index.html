@@ -148,10 +148,8 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 .card.can{cursor:pointer}
 .card.can:hover{--ty:-3px}
 .card.noanim,.card.drag{transition:none}
-/* noflip: глушит только анимацию переворота, скольжение остаётся */
 .card.noflip .inner{transition:none}
 .card.drag{cursor:grabbing}
-/* flat: карта лежит в колоде — без тени, чтобы под стопкой не было тёмного пятна */
 .card.flat .face{box-shadow:none}
 .lift,.inner,.face{pointer-events:none}
 .lift{position:absolute;left:0;top:0;right:0;bottom:0;
@@ -173,13 +171,11 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
 .face.back{transform:rotateY(180deg);border-radius:var(--cr,10px);box-shadow:0 2px 5px rgba(7,20,13,.45)}
 .face-svg{width:100%;height:100%;display:block}
 
-/* подсветка подсказки: карты */
 .card.hint .front{animation:hintPulse .8s ease-in-out 3}
 @keyframes hintPulse{
   0%,100%{box-shadow:0 0 20px rgba(0,200,255,.8),0 0 40px rgba(0,200,255,.4)}
   50%{box-shadow:0 0 30px rgba(0,220,255,1),0 0 50px rgba(0,200,255,.6)}
 }
-/* подсветка слотов (колода/пустой дом): кольцо + компактное свечение */
 .slot.hint{animation:slotHintPulse .8s ease-in-out 3}
 @keyframes slotHintPulse{
   0%,100%{box-shadow:0 0 0 2px rgba(0,220,255,.9),0 0 10px rgba(0,205,255,.75),0 0 18px rgba(0,200,255,.4)}
@@ -284,7 +280,7 @@ body::after{content:'';position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;p
       <div class="mode-desc">Сложная игра. Из колоды сдаётся по три карты</div>
     </button>
   </div>
-  <p class="menu-hint">Клик по колоде — сдача карт · клик по карте — она сама отправится на своё место · также карты можно перетаскивать</p>
+  <p class="menu-hint">Каждая раздача гарантированно собирается · клик по колоде — сдача карт · клик по карте — она сама отправится на своё место · также карты можно перетаскивать</p>
 </div>
 
 <!-- ИГРА -->
@@ -333,7 +329,7 @@ const state={drawCount:1,stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],
 let undoStack=[],lastReal=null;
 let moveTags=new Set();
 let fruitlessRecycles=0,movesSinceRecycle=0;
-let deadShown=false; /* окно «Ходов нет» уже показано для текущего тупика */
+let deadShown=false;
 let timerInt=null,pending=[];
 let CW=100,CH=142,P={};
 let slotEls={};
@@ -349,6 +345,75 @@ function buildDeck(){
   }
 }
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]];}}
+
+/* ================== ГАРАНТИРОВАННАЯ РАЗДАЧА ==================
+   Обратная генерация: назначаем каждой карте её «фундаментное время» t
+   (глобальный порядок игры в дома, внутри масти строго A→K, масти
+   перемешаны). Затем строим раскладку так, чтобы стратегия
+   «играй доступную карту с наименьшим t; иначе бери из колоды»
+   доводила партию до победы:
+   · в колонке ВЕРХ = минимальное t (карта вскрывается ровно к своему ходу);
+   · колода выдаёт карты в порядке возрастания t; в режиме «по три»
+     внутри каждого веера из трёх порядок обращён (верх веера играется
+     первым), поэтому веера распутываются без перекладываний.
+   Возвращает массив ключей 'масть+ранг' — порядок массива колоды
+   (pop() берёт с конца). */
+function dealGuaranteedKeys(drawCount){
+  /* 1) глобальный порядок игры в дома */
+  const piles=[[],[],[],[]];
+  for(let s=0;s<4;s++)for(let r=1;r<=13;r++)piles[s].push(r);
+  const tOrder=[];const alive=[0,1,2,3];
+  while(alive.length){
+    const k=(Math.random()*alive.length)|0,s=alive[k];
+    tOrder.push(SUITS[s]+piles[s].shift());
+    if(!piles[s].length)alive.splice(k,1);
+  }
+  const tOf={};tOrder.forEach((key,i)=>tOf[key]=i);
+
+  /* 2) случайные 28 карт — на стол, остальные 24 — в колоду */
+  const pos=[];for(let i=0;i<52;i++)pos.push(i);
+  shuffle(pos);
+  const dealtSet=new Set(pos.slice(0,28));
+
+  /* 3) распределение по колонкам: колонка c вмещает c+1 карт */
+  const slots=[];
+  for(let c=0;c<7;c++)for(let i=0;i<=c;i++)slots.push(c);
+  shuffle(slots);
+  const cols=[[],[],[],[],[],[],[]];
+  const stockKeys=[];
+  let si=0;
+  for(let i=0;i<52;i++){
+    const key=tOrder[i];
+    if(dealtSet.has(i))cols[slots[si++]].push(key);
+    else stockKeys.push(key);
+  }
+
+  /* 4) в колонке: НИЗ = максимальное t, ВЕРХ = минимальное t */
+  cols.forEach(col=>col.sort((a,b)=>tOf[b]-tOf[a]));
+
+  /* 5) порядок раздачи анимации: ряд за рядом (r=0..6, колонки r..6) */
+  const dealSeq=[];
+  for(let r=0;r<7;r++)for(let c=r;c<7;c++)dealSeq.push(cols[c][r]);
+
+  /* 6) порядок вылетов из колоды (u — карты колоды по возрастанию t):
+        по одной : u1,u2,…,u24
+        по три   : u3,u2,u1, u6,u5,u4, … — верх веера играется первым */
+  const u=stockKeys.slice().sort((a,b)=>tOf[a]-tOf[b]);
+  const p=[];
+  if(drawCount===3){
+    for(let i=0;i<u.length;i+=3)
+      for(let j=Math.min(i+2,u.length-1);j>=i;j--)p.push(u[j]);
+  }else{
+    for(let i=0;i<u.length;i++)p.push(u[i]);
+  }
+
+  /* 7) массив колоды: pop() берёт с конца —
+        голова = reverse(p)  (порядок вылетов во время игры),
+        хвост = reverse(dealSeq) (анимация раздаёт эту раскладку) */
+  const stockArr=p.slice().reverse();
+  for(let i=dealSeq.length-1;i>=0;i--)stockArr.push(dealSeq[i]);
+  return stockArr;
+}
 
 /* ================== ЛИЦО КАРТЫ (SVG) ================== */
 function faceSVG(suit, rank) {
@@ -392,7 +457,8 @@ function buildBoard(){
 }
 const slotKey=ref=>ref.k==='found'?'f'+ref.i:ref.k==='tab'?'t'+ref.i:ref.k;
 
-/* ================== РАСКЛАДКА ================== */
+/* ================== РАСКЛАДКА ==================
+   Верхний ряд: дома (0–3) · пусто (4) · сброс (5) · КОЛОДА (6). */
 function layout(){
   const bwRaw=boardEl.clientWidth,bh=boardEl.clientHeight;
   if(bwRaw<50||bh<80){
@@ -480,7 +546,6 @@ function render(){
     let y=P.tab[ti].y;
     t.forEach((c,i)=>{place(c,P.tab[ti].x,y,i);y+=c.faceUp?u:d;});
   });
-  /* картам в колоде — без тени (иначе слои теней дают тёмный край под стопкой) */
   deck.forEach(c=>c.el.classList.toggle('flat',inStock.has(c)));
   deck.forEach(c=>c.el.classList.toggle('can',canPick(c)));
 }
@@ -599,7 +664,7 @@ function undo(){
     const r=undoStack.pop();
     if(applyInverse(r)){
       lastReal=null;
-      deadShown=false; /* позиция изменилась — окно тупика может показаться снова */
+      deadShown=false;
       setAutoVisible(!state.finished&&canAutoFinish());
       return;
     }
@@ -626,7 +691,7 @@ function moveGroup(cards,fromRef,toRef){
   lastReal={id:topId,from:fk,to:tk};
   state.moves++;
   movesSinceRecycle++;fruitlessRecycles=0;
-  deadShown=false; /* позиция изменилась */
+  deadShown=false;
   render();fly(cards);sfx('place');
   updateHUD();afterAction();
 }
@@ -664,10 +729,10 @@ function afterAction(){
     state.autoModalShown=true;
     sfx('hint');
     showModal({kicker:'Автозавершение',title:'Всё сходится',
-      text:'Все карты открыты. Разложить пасьянс автоматически?',
+      text:'Все карты открыты, а колода пуста — оставшиеся ходы однозначны. Разложить пасьянс автоматически?',
       buttons:[
         {label:'Играть дальше'},
-        {label:'Завершить',cls:'primary',fn:autoFinish}
+        {label:'Разложить',cls:'primary',fn:autoFinish}
       ]});
     return;
   }
@@ -859,14 +924,15 @@ function listMoves(){
     for(let j=0;j<t.length;j++){
       const c=t[j];
       if(!c.faceUp)continue;
-      const flips=j>0&&!t[j-1].faceUp;
-      const empties=j===0;
-      if(!flips&&!empties)continue;
+      const flips=j>0&&!t[j-1].faceUp;   /* откроет закрытую карту */
+      const empties=j===0;                /* освободит колонку */
+      const reveals=j>0&&t[j-1].faceUp;   /* откроет доступ к открытой карте */
+      if(!flips&&!empties&&!reveals)continue;
       for(let k=0;k<7;k++){
         if(k===ti)continue;
         if(!canDropOnTab(c,k))continue;
         if(empties&&c.rank===13&&state.tab[k].length===0)continue;
-        res.push({sc:flips?80:30,src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti,flips:flips?1:0});
+        res.push({sc:flips?80:reveals?55:30,src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti});
         break;
       }
     }
@@ -895,32 +961,68 @@ function anyUnbannedDrawValue(){
   }
   return false;
 }
-/* общий поиск лучшего доступного хода — им пользуются и подсказка,
-   и автоматическое окно «Ходов нет» (гарантия одинакового поведения) */
+/* выбор хода для подсказки: сперва неигравшие ходы, затем любые законные
+   (кроме мгновенного отката последнего хода) */
 function findHintMove(){
   const all=listMoves().sort((a,b)=>b.sc-a.sc);
   for(const mv of all){
     if(mv.kind)continue;
-    const safe=mv.dst.k==='found'||mv.flips;
-    if(!safe){
-      const top=mv.src[mv.src.length-1];
-      const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
-      if(moveTags.has(tag))continue;
-      if(lastReal&&lastReal.id!=null){
-        if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
-        if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
-      }
+    const top=mv.src[mv.src.length-1];
+    const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
+    if(moveTags.has(tag))continue;
+    if(lastReal&&lastReal.id!=null){
+      if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
+      if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
+    }
+    return mv;
+  }
+  for(const mv of all){
+    if(mv.kind)continue;
+    const top=mv.src[mv.src.length-1];
+    const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
+    if(lastReal&&lastReal.id!=null){
+      if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
+      if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
     }
     return mv;
   }
   return null;
 }
-function noMovesLeft(){
-  if(findHintMove())return false;
-  const hasStock=state.stock.length>0;
-  const hasRecycle=!hasStock&&state.waste.length>0;
-  if((hasStock||hasRecycle)&&fruitlessRecycles===0&&anyUnbannedDrawValue())return false;
-  return true;
+/* СТРОГАЯ проверка тупика: не зависит от подсказок, запретов и счётчиков.
+   Тупик — только когда ни одного законного хода не существует:
+   ни в дома, ни между колонок, ни из сброса, и ни одна карта
+   всего оставшегося цикла колоды никуда не может быть сыграна. */
+function anyLegalMove(){
+  const wt=state.waste[state.waste.length-1];
+  if(wt){
+    if(foundFor(wt)>=0)return true;
+    for(let k=0;k<7;k++){
+      if(canDropOnTab(wt,k)&&!(state.tab[k].length===0&&wt.rank===13))return true;
+    }
+  }
+  for(let ti=0;ti<7;ti++){
+    const t=state.tab[ti];
+    for(let j=0;j<t.length;j++){
+      const c=t[j];
+      if(!c.faceUp)continue;
+      if(j===t.length-1&&foundFor(c)>=0)return true;
+      for(let k=0;k<7;k++){
+        if(k===ti)continue;
+        if(!canDropOnTab(c,k))continue;
+        if(j===0&&c.rank===13&&state.tab[k].length===0)continue;
+        return true;
+      }
+    }
+  }
+  const seq=[...state.stock].reverse();
+  for(let i=state.waste.length-1;i>=0;i--)seq.push(state.waste[i]);
+  for(const c of seq){
+    if(foundFor(c)>=0)return true;
+    for(let k=0;k<7;k++){
+      if(canDropOnTab(c,k)&&!(state.tab[k].length===0&&c.rank===13))return true;
+    }
+  }
+  return false;
 }
 let hintEls=[],hintTimer=null;
 function clearHint(){
@@ -936,8 +1038,8 @@ function hint(){
     const dst=arrOf(chosen.dst);
     hintEls.push(dst.length?dst[dst.length-1].el:slotEls[slotKey(chosen.dst)]);
   }else{
-    const hasStock=allKind(listMoves(),'stock');
-    const hasRecycle=allKind(listMoves(),'recycle');
+    const hasStock=state.stock.length>0;
+    const hasRecycle=!hasStock&&state.waste.length>0;
     if((hasStock||hasRecycle)&&fruitlessRecycles===0&&anyUnbannedDrawValue()){
       hintEls.push(slotEls.stock);
       toast(hasStock?'Возьмите карты из колоды':'Соберите колоду заново из сброса');
@@ -949,13 +1051,13 @@ function hint(){
   hintEls.forEach(el=>el.classList.add('hint'));
   hintTimer=setTimeout(clearHint,2100);
 }
-function allKind(moves,kind){return moves.some(m=>m.kind===kind);}
 
-/* автоматическое окно «Ходов нет» — та же диагностика, что у подсказки */
+/* автоматическое окно «Ходов нет» — строгая проверка anyLegalMove() */
 function checkDead(){
   if(deadShown||state.finished||state.busy)return;
-  if(canAutoFinish())return; /* доступно автозавершение — это не тупик */
-  if(!noMovesLeft())return;
+  if(state.moves===0)return; /* в начале партии тупика быть не может */
+  if(canAutoFinish())return;
+  if(anyLegalMove())return;
   deadShown=true;
   sfx('hint');
   showModal({kicker:'Тупик',title:'Ходов нет',
@@ -1166,9 +1268,14 @@ function newGame(dc){
   state.finished=false;state.autoModalShown=false;state.busy=true;
   stopTimer();updateHUD();
   setAutoVisible(false);
-  buildDeck();shuffle(deck);
-  state.stock=deck.slice();state.waste=[];
-  state.found=[[],[],[],[]];state.tab=[[],[],[],[],[],[],[]];
+  buildDeck();
+  /* гарантированно решаемая раздача (обратная генерация) */
+  const keys=dealGuaranteedKeys(dc);
+  const byKey={};deck.forEach(c=>{byKey[c.suit+c.rank]=c;});
+  state.stock=keys.map(k=>byKey[k]);
+  state.waste=[];
+  state.found=[[],[],[],[]];
+  state.tab=[[],[],[],[],[],[],[]];
   buildBoard();
   layout();
   if(!layoutOK){pendingDeal=true;return;}
