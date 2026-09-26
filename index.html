@@ -347,15 +347,13 @@ function buildDeck(){
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]];}}
 
 /* ================== ГАРАНТИРОВАННАЯ РАЗДАЧА ==================
-   Обратная генерация: назначаем каждой карте её «фундаментное время» t
+   Обратная генерация: каждой карте назначается «фундаментное время» t
    (глобальный порядок игры в дома, внутри масти строго A→K, масти
-   перемешаны). Затем строим раскладку так, чтобы стратегия
-   «играй доступную карту с наименьшим t; иначе бери из колоды»
-   доводила партию до победы:
+   перемешаны). Раскладка строится так, чтобы стратегия «играй доступную
+   карту с минимальным t; иначе бери из колоды» доводила партию до победы:
    · в колонке ВЕРХ = минимальное t (карта вскрывается ровно к своему ходу);
    · колода выдаёт карты в порядке возрастания t; в режиме «по три»
-     внутри каждого веера из трёх порядок обращён (верх веера играется
-     первым), поэтому веера распутываются без перекладываний.
+     внутри каждого веера порядок обращён (верх веера играется первым).
    Возвращает массив ключей 'масть+ранг' — порядок массива колоды
    (pop() берёт с конца). */
 function dealGuaranteedKeys(drawCount){
@@ -701,6 +699,7 @@ function drawStock(){
   if(state.stock.length){
     const n=Math.min(state.drawCount,state.stock.length);
     const cards=state.stock.splice(state.stock.length-n,n);
+    /* выезжают уже открытыми: переворот мгновенный, скольжение остаётся */
     cards.forEach(c=>{c.el.classList.add('noflip');c.faceUp=true;});
     state.waste.push(...cards);
     recordMove({t:'d',n});
@@ -932,7 +931,8 @@ function listMoves(){
         if(k===ti)continue;
         if(!canDropOnTab(c,k))continue;
         if(empties&&c.rank===13&&state.tab[k].length===0)continue;
-        res.push({sc:flips?80:reveals?55:30,src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti});
+        res.push({sc:flips?80:reveals?55:30,src:t.slice(j),dst:{k:'tab',i:k},
+                  from:'t'+ti,flips:flips?1:0});
         break;
       }
     }
@@ -961,25 +961,19 @@ function anyUnbannedDrawValue(){
   }
   return false;
 }
-/* выбор хода для подсказки: сперва неигравшие ходы, затем любые законные
-   (кроме мгновенного отката последнего хода) */
+/* выбор хода для подсказки. Прогресс-ходы (в дом / открывающие закрытую
+   карту) не банятся никогда — они не могут зациклиться по своей природе.
+   Все остальные ходы предлагаются строго один раз за партию; второй
+   проход по «уже сделанным» отсутствует — это и было источником циклов. */
 function findHintMove(){
   const all=listMoves().sort((a,b)=>b.sc-a.sc);
   for(const mv of all){
     if(mv.kind)continue;
+    const progress=mv.dst.k==='found'||mv.flips===1;
     const top=mv.src[mv.src.length-1];
     const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
-    if(moveTags.has(tag))continue;
-    if(lastReal&&lastReal.id!=null){
-      if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
-      if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
-    }
-    return mv;
-  }
-  for(const mv of all){
-    if(mv.kind)continue;
-    const top=mv.src[mv.src.length-1];
-    const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
+    if(!progress&&moveTags.has(tag))continue;
+    /* и никогда не предлагаем мгновенный откат только что сделанного хода */
     if(lastReal&&lastReal.id!=null){
       if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
       if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
