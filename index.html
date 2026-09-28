@@ -328,7 +328,6 @@ const state={drawCount:1,stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],
   moves:0,seconds:0,busy:false,finished:false,autoModalShown:false};
 let undoStack=[],lastReal=null;
 let moveTags=new Set();
-let fruitlessRecycles=0,movesSinceRecycle=0;
 let deadShown=false;
 let timerInt=null,pending=[];
 let CW=100,CH=142,P={};
@@ -448,6 +447,7 @@ function dealGuaranteedKeys(drawCount){
     const d=tryBuildDeal(drawCount);
     if(verifyDeal(d,drawCount))return d.stockArr;
   }
+  console.warn('dealGuaranteedKeys: verify failed after 80 attempts, using fallback deal');
   return tryBuildDeal(drawCount).stockArr;
 }
 
@@ -666,8 +666,6 @@ function applyInverse(r){
       moveTags.delete(r.id+'|'+k2+'|'+k1);
     }
     state.moves=Math.max(0,state.moves-1);
-    movesSinceRecycle=Math.max(0,movesSinceRecycle-1);
-    fruitlessRecycles=0;
     updateHUD();render();fly(seg);sfx('flip');
     return true;
   }
@@ -687,7 +685,6 @@ function applyInverse(r){
     seg.forEach(c=>c.faceUp=true);
     state.waste=seg;
     state.moves=Math.max(0,state.moves-1);
-    fruitlessRecycles=Math.max(0,fruitlessRecycles-1);
     updateHUD();snapCards(seg);sfx('flip');
     return true;
   }
@@ -724,9 +721,13 @@ function moveGroup(cards,fromRef,toRef){
   const fk=pkey(fromRef),tk=pkey(toRef);
   moveTags.add(topId+'|'+fk+'|'+tk);
   moveTags.add(topId+'|'+tk+'|'+fk);
+  /* ограничиваем рост журнала банов на случай долгих партий без recycle */
+  if(moveTags.size>400){
+    const first=moveTags.values().next().value;
+    moveTags.delete(first);
+  }
   lastReal={id:topId,from:fk,to:tk};
   state.moves++;
-  movesSinceRecycle++;fruitlessRecycles=0;
   deadShown=false;
   render();fly(cards);sfx('place');
   updateHUD();afterAction();
@@ -750,9 +751,7 @@ function drawStock(){
     recordMove({t:'r',n});
     lastReal={type:'recycle'};
     state.moves++;
-    if(movesSinceRecycle===0)fruitlessRecycles++;
-    else fruitlessRecycles=0;
-    movesSinceRecycle=0;
+    moveTags.clear(); /* сброс→сток меняет контекст, старые баны неактуальны */
     snapCards(state.stock.slice());
     sfx('flip');
     updateHUD();afterAction();
@@ -964,21 +963,21 @@ function listMoves(){
       const empties=j===0;
       const reveals=j>0&&t[j-1].faceUp;
       if(!flips&&!empties&&!reveals)continue;
+      /* собираем ВСЕ подходящие колонки, а не только первую */
       for(let k=0;k<7;k++){
         if(k===ti)continue;
         if(!canDropOnTab(c,k))continue;
         if(empties&&c.rank===13&&state.tab[k].length===0)continue;
         res.push({sc:flips?80:reveals?55:30,src:t.slice(j),dst:{k:'tab',i:k},
                   from:'t'+ti,flips:flips?1:0});
-        break;
       }
     }
   });
   if(wt){
+    /* все колонки, куда можно положить верхнюю карту сброса */
     for(let k=0;k<7;k++){
       if(canDropOnTab(wt,k)&&!(state.tab[k].length===0&&wt.rank===13)){
         res.push({sc:state.stock.length?40:10,src:[wt],dst:{k:'tab',i:k},from:'waste'});
-        break;
       }
     }
   }
@@ -986,21 +985,18 @@ function listMoves(){
   else if(state.waste.length)res.push({kind:'recycle',sc:6});
   return res;
 }
-/* выбор хода для подсказки. Приоритеты под механику гарантированной
-   раздачи: 1) ход в дом (всегда прогресс, не банится);
-   2) взять из колоды (двигает решение, не «ход ради хода»);
-   3) восстановительные ходы по столу — только когда колода уже
-      бесплодна/пуста, и каждый не более одного раза за партию;
-   4) переворот сброса. Никаких повторов уже сделанных ходов. */
+/* Приоритеты подсказки: 1) ход в дом (всегда прогресс); 2) взять из
+   колоды — без оглядки на какие-либо счётчики; 3) ходы по столу с
+   фильтром уже сделанных; 4) переворот сброса; 5) fallback — сток/сброс. */
 function findHintMove(){
   const all=listMoves().sort((a,b)=>b.sc-a.sc);
-  /* 1) в дом */
+  /* 1) ход в дом */
   for(const mv of all){
     if(!mv.kind&&mv.dst.k==='found')return mv;
   }
-  /* 2) колода */
-  if(state.stock.length&&fruitlessRecycles===0)return{kind:'stock'};
-  /* 3) ходы по столу — восстановление после отклонений от сценария */
+  /* 2) взять из колоды */
+  if(state.stock.length)return{kind:'stock'};
+  /* 3) ходы по столу — не предлагать уже сделанные и мгновенный откат */
   for(const mv of all){
     if(mv.kind)continue;
     const top=mv.src[mv.src.length-1];
@@ -1013,10 +1009,14 @@ function findHintMove(){
     return mv;
   }
   /* 4) переворот сброса */
-  if(!state.stock.length&&state.waste.length&&fruitlessRecycles===0)return{kind:'recycle'};
+  if(!state.stock.length&&state.waste.length)return{kind:'recycle'};
+  /* 5) fallback */
+  if(state.stock.length)return{kind:'stock'};
+  if(state.waste.length)return{kind:'recycle'};
   return null;
 }
-/* СТРОГАЯ проверка тупика: не зависит от подсказок, запретов и счётчиков. */
+/* СТРОГАЯ проверка тупика: не зависит от подсказок, запретов и счётчиков.
+   Сток реально доступен только верхней картой; сброс — веером сверху. */
 function anyLegalMove(){
   const wt=state.waste[state.waste.length-1];
   if(wt){
@@ -1039,9 +1039,15 @@ function anyLegalMove(){
       }
     }
   }
-  const seq=[...state.stock].reverse();
-  for(let i=state.waste.length-1;i>=0;i--)seq.push(state.waste[i]);
-  for(const c of seq){
+  if(state.stock.length){
+    const top=state.stock[state.stock.length-1];
+    if(foundFor(top)>=0)return true;
+    for(let k=0;k<7;k++){
+      if(canDropOnTab(top,k)&&!(state.tab[k].length===0&&top.rank===13))return true;
+    }
+  }
+  for(let i=state.waste.length-1;i>=0;i--){
+    const c=state.waste[i];
     if(foundFor(c)>=0)return true;
     for(let k=0;k<7;k++){
       if(canDropOnTab(c,k)&&!(state.tab[k].length===0&&c.rank===13))return true;
@@ -1285,7 +1291,7 @@ function newGame(dc){
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
   undoStack=[];lastReal=null;moveTags.clear();
-  fruitlessRecycles=0;movesSinceRecycle=0;deadShown=false;
+  deadShown=false;
   state.drawCount=dc;state.moves=0;state.seconds=0;
   state.finished=false;state.autoModalShown=false;state.busy=true;
   stopTimer();updateHUD();
@@ -1311,7 +1317,7 @@ function goHome(){
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
   undoStack=[];lastReal=null;moveTags.clear();
-  fruitlessRecycles=0;movesSinceRecycle=0;deadShown=false;
+  deadShown=false;
   stopTimer();state.busy=false;
   setAutoVisible(false);
   gameEl.classList.add('off');
