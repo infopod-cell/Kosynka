@@ -326,7 +326,7 @@ const RANK_TXT=['','A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 let deck=[];
 const state={drawCount:1,stock:[],waste:[],found:[[],[],[],[]],tab:[[],[],[],[],[],[],[]],
   moves:0,seconds:0,busy:false,finished:false,autoModalShown:false};
-let undoStack=[],lastReal=null;
+let undoStack=[],recentMoves=[];
 let moveTags=new Set();
 let deadShown=false;
 let timerInt=null,pending=[];
@@ -696,7 +696,13 @@ function undo(){
   while(undoStack.length){
     const r=undoStack.pop();
     if(applyInverse(r)){
-      lastReal=null;
+      /* точное удаление откатываемого хода из недавних (по id и стопкам) */
+      if(r.t==='m'&&r.id!=null){
+        const fk=r.fk==='tab'?'t'+r.fi:r.fk==='found'?'f'+r.fi:r.fk;
+        const tk=r.tk==='tab'?'t'+r.ti:r.tk==='found'?'f'+r.ti:r.tk;
+        recentMoves=recentMoves.filter(rm=>
+          !(rm.id===r.id&&rm.from===fk&&rm.to===tk));
+      }
       deadShown=false;
       setAutoVisible(!state.finished&&canAutoFinish());
       return;
@@ -726,7 +732,9 @@ function moveGroup(cards,fromRef,toRef){
     const first=moveTags.values().next().value;
     moveTags.delete(first);
   }
-  lastReal={id:topId,from:fk,to:tk};
+  /* история последних ходов (до 6) */
+  recentMoves.push({id:topId,from:fk,to:tk});
+  if(recentMoves.length>6)recentMoves.shift();
   state.moves++;
   deadShown=false;
   render();fly(cards);sfx('place');
@@ -741,7 +749,7 @@ function drawStock(){
     cards.forEach(c=>{c.el.classList.add('noflip');c.faceUp=true;});
     state.waste.push(...cards);
     recordMove({t:'d',n});
-    lastReal={type:'draw'};
+    recentMoves=[]; /* сдача из колоды обнуляет контекст недавних ходов */
     state.moves++;render();fly(cards);sfx('flip');
     later(()=>cards.forEach(c=>c.el.classList.remove('noflip')),90);
     updateHUD();afterAction();
@@ -749,15 +757,16 @@ function drawStock(){
     const n=state.waste.length;
     while(state.waste.length){const c=state.waste.pop();c.faceUp=false;state.stock.push(c);}
     recordMove({t:'r',n});
-    lastReal={type:'recycle'};
     state.moves++;
     moveTags.clear(); /* сброс→сток меняет контекст, старые баны неактуальны */
+    recentMoves=[];
     snapCards(state.stock.slice());
     sfx('flip');
     updateHUD();afterAction();
   }
 }
 function afterAction(){
+  /* сначала автозавершение — оно не зависит от тупика */
   const can=canAutoFinish();
   setAutoVisible(can&&!state.finished);
   if(can&&!state.finished&&!state.autoModalShown){
@@ -771,6 +780,7 @@ function afterAction(){
       ]});
     return;
   }
+  /* теперь тупик — массивы уже обновлены, анимации завершены */
   checkDead();
 }
 
@@ -942,18 +952,55 @@ function findDropTarget(cards,cx,cy){
 }
 
 /* ================== ПОДСКАЗКА И ДИАГНОСТИКА ТУПИКА ================== */
+/* чистый прогресс хода: бонусы за открывание/освобождение,
+   штрафы за «топтание на месте» (перекладывание королей,
+   пустые перестановки). Может быть отрицательным. */
+function moveScore(cards,fromRef,toRef,j){
+  if(!cards||!cards.length)return 0;
+  const src=arrOf(fromRef),dst=arrOf(toRef);
+  if(!src||!dst)return 0;
+  if(toRef.k==='found'){
+    /* в дом — всегда прогресс; плюс бонус за открытие/освобождение */
+    if(fromRef.k==='tab'){
+      if(j>0&&!src[j-1].faceUp)return 180; /* попутно откроет закрытую */
+      if(j===0)return 160;                 /* попутно освободит колонку */
+    }
+    return 100;
+  }
+  if(fromRef.k==='waste')return 5; /* из сброса на стол — минимальный прогресс */
+  /* далее — ходы между колонками */
+  const dstEmpty=!dst.length;
+  const dstTop=dst.length?dst[dst.length-1]:null;
+  const below=j>0?src[j-1]:null;   /* карта под перемещаемой группой */
+  const flips=!!(below&&!below.faceUp);
+  const empties=j===0;
+  const reveals=!!(below&&below.faceUp);
+  let sc=0;
+  if(flips)sc+=80;            /* откроет закрытую карту */
+  if(empties)sc+=60;          /* освободит колонку */
+  else if(reveals)sc+=10;     /* откроет доступ к открытой карте */
+  if(!flips&&!empties)sc-=50; /* ничего не открывает и не освобождает */
+  /* перекладывание с открытого короля на короля/пустоту — без выигрыша */
+  if(reveals&&below.rank===13&&
+     (dstEmpty||(dstTop&&dstTop.faceUp&&dstTop.rank===13)))sc-=90;
+  /* король на пустую колонку без освобождения исходной — без выигрыша */
+  if(dstEmpty&&cards[0].rank===13&&j>0)sc-=70;
+  return sc;
+}
 function listMoves(){
   const res=[];
   const wt=state.waste[state.waste.length-1];
   if(wt){
     const fi=foundFor(wt);
-    if(fi>=0)res.push({sc:100,src:[wt],dst:{k:'found',i:fi},from:'waste'});
+    if(fi>=0)res.push({sc:moveScore([wt],{k:'waste'},{k:'found',i:fi},state.waste.length-1),
+      src:[wt],dst:{k:'found',i:fi},from:'waste'});
   }
   state.tab.forEach((t,ti)=>{
     const c=t[t.length-1];
     if(!c||!c.faceUp)return;
     const fi=foundFor(c);
-    if(fi>=0)res.push({sc:90,src:[c],dst:{k:'found',i:fi},from:'t'+ti});
+    if(fi>=0)res.push({sc:moveScore([c],{k:'tab',i:ti},{k:'found',i:fi},t.length-1),
+      src:[c],dst:{k:'found',i:fi},from:'t'+ti});
   });
   state.tab.forEach((t,ti)=>{
     for(let j=0;j<t.length;j++){
@@ -968,8 +1015,8 @@ function listMoves(){
         if(k===ti)continue;
         if(!canDropOnTab(c,k))continue;
         if(empties&&c.rank===13&&state.tab[k].length===0)continue;
-        res.push({sc:flips?80:reveals?55:30,src:t.slice(j),dst:{k:'tab',i:k},
-                  from:'t'+ti,flips:flips?1:0});
+        res.push({sc:moveScore(t.slice(j),{k:'tab',i:ti},{k:'tab',i:k},j),
+          src:t.slice(j),dst:{k:'tab',i:k},from:'t'+ti,flips:flips?1:0});
       }
     }
   });
@@ -977,7 +1024,8 @@ function listMoves(){
     /* все колонки, куда можно положить верхнюю карту сброса */
     for(let k=0;k<7;k++){
       if(canDropOnTab(wt,k)&&!(state.tab[k].length===0&&wt.rank===13)){
-        res.push({sc:state.stock.length?40:10,src:[wt],dst:{k:'tab',i:k},from:'waste'});
+        res.push({sc:moveScore([wt],{k:'waste'},{k:'tab',i:k},state.waste.length-1),
+          src:[wt],dst:{k:'tab',i:k},from:'waste'});
       }
     }
   }
@@ -985,75 +1033,102 @@ function listMoves(){
   else if(state.waste.length)res.push({kind:'recycle',sc:6});
   return res;
 }
-/* Приоритеты подсказки: 1) ход в дом (всегда прогресс); 2) взять из
-   колоды — без оглядки на какие-либо счётчики; 3) ходы по столу с
-   фильтром уже сделанных; 4) переворот сброса; 5) fallback — сток/сброс. */
-function findHintMove(){
-  const all=listMoves().sort((a,b)=>b.sc-a.sc);
-  /* 1) ход в дом */
-  for(const mv of all){
-    if(!mv.kind&&mv.dst.k==='found')return mv;
-  }
-  /* 2) взять из колоды */
-  if(state.stock.length)return{kind:'stock'};
-  /* 3) ходы по столу — не предлагать уже сделанные и мгновенный откат */
-  for(const mv of all){
-    if(mv.kind)continue;
-    const top=mv.src[mv.src.length-1];
-    const tag=top.id+'|'+mv.from+'|'+pkey(mv.dst);
-    if(moveTags.has(tag))continue;
-    if(lastReal&&lastReal.id!=null){
-      if(tag===lastReal.id+'|'+lastReal.from+'|'+lastReal.to)continue;
-      if(tag===lastReal.id+'|'+lastReal.to+'|'+lastReal.from)continue;
-    }
-    return mv;
-  }
-  /* 4) переворот сброса */
-  if(!state.stock.length&&state.waste.length)return{kind:'recycle'};
-  /* 5) fallback */
-  if(state.stock.length)return{kind:'stock'};
-  if(state.waste.length)return{kind:'recycle'};
-  return null;
-}
-/* СТРОГАЯ проверка тупика: не зависит от подсказок, запретов и счётчиков.
-   Сток реально доступен только верхней картой; сброс — веером сверху. */
-function anyLegalMove(){
-  const wt=state.waste[state.waste.length-1];
-  if(wt){
-    if(foundFor(wt)>=0)return true;
-    for(let k=0;k<7;k++){
-      if(canDropOnTab(wt,k)&&!(state.tab[k].length===0&&wt.rank===13))return true;
-    }
-  }
-  for(let ti=0;ti<7;ti++){
-    const t=state.tab[ti];
-    for(let j=0;j<t.length;j++){
-      const c=t[j];
-      if(!c.faceUp)continue;
-      if(j===t.length-1&&foundFor(c)>=0)return true;
-      for(let k=0;k<7;k++){
-        if(k===ti)continue;
-        if(!canDropOnTab(c,k))continue;
-        if(j===0&&c.rank===13&&state.tab[k].length===0)continue;
-        return true;
-      }
-    }
-  }
-  if(state.stock.length){
-    const top=state.stock[state.stock.length-1];
-    if(foundFor(top)>=0)return true;
-    for(let k=0;k<7;k++){
-      if(canDropOnTab(top,k)&&!(state.tab[k].length===0&&top.rank===13))return true;
-    }
-  }
-  for(let i=state.waste.length-1;i>=0;i--){
-    const c=state.waste[i];
+/* есть ли среди карт кучки хотя бы одна, играбельная ПРЯМО СЕЙЧАС
+   (в дом или на колонку). Используется в подсказке и в проверке тупика
+   для карт цикла сдачи: позиция стола при сдачах не меняется, поэтому
+   проверка корректна для любой карты стока/сброса. */
+function pileHasUsefulCard(cards){
+  for(const c of cards){
     if(foundFor(c)>=0)return true;
     for(let k=0;k<7;k++){
       if(canDropOnTab(c,k)&&!(state.tab[k].length===0&&c.rank===13))return true;
     }
   }
   return false;
+}
+/* ЕДИНАЯ диагностика тупика — её зеркальную структуру повторяет
+   findHintMove, поэтому подсказка и автоокно всегда согласованы:
+   тупик = нет хода в дом (с верха сброса/колонок), нет прогресс-хода
+   по столу (открыть закрытую карту / освободить колонку) и ни одна
+   карта цикла сдачи (сток+сброс) не является играбельной.
+   В гарантированной раздаче следующий по сценарию ход в дом всегда
+   доступен (верх колонки или цикл сдачи), поэтому при правильной игре
+   окно тупика не появляется ни разу. */
+function anyLegalMove(){
+  /* 1) ход в дом с верхней карты сброса */
+  const wt=state.waste[state.waste.length-1];
+  if(wt&&foundFor(wt)>=0)return true;
+  /* 2) ход в дом с верха колонки */
+  for(let ti=0;ti<7;ti++){
+    const t=state.tab[ti],c=t[t.length-1];
+    if(c&&c.faceUp&&foundFor(c)>=0)return true;
+  }
+  /* 3) прогресс-ход по столу: откроет закрытую карту или освободит
+     колонку (простые перестановки ходом не считаются — они не меняют
+     доступ к новым картам) */
+  for(let ti=0;ti<7;ti++){
+    const t=state.tab[ti];
+    for(let j=0;j<t.length;j++){
+      const c=t[j];
+      if(!c.faceUp)continue;
+      const flips=j>0&&!t[j-1].faceUp;
+      const empties=j===0;
+      if(!flips&&!empties)continue;
+      for(let k=0;k<7;k++){
+        if(k===ti)continue;
+        if(!canDropOnTab(c,k))continue;
+        if(empties&&c.rank===13&&state.tab[k].length===0)continue;
+        return true;
+      }
+    }
+  }
+  /* 4) сдача/recycle полезны, если в цикле сдачи (сток+сброс) есть
+     играбельная карта — сдачами до неё можно добраться */
+  if(pileHasUsefulCard(state.stock))return true;
+  if(pileHasUsefulCard(state.waste))return true;
+  /* 5) тупик */
+  return false;
+}
+/* Подсказка — зеркальна anyLegalMove (держать синхронно!):
+   1) ход в дом с верха сброса; 2) ход в дом с верха колонки;
+   3) лучший прогресс-ход по столу (sc>0 — такие ходы монотонны:
+      открытие карты/дом/освобождение колонки необратимы, зациклиться
+      не могут, поэтому фильтры повторов не нужны); 4) взять из колоды,
+      если в цикле есть играбельная карта; 5) recycle при пустом стоке
+      и играбельном сбросе; 6) иначе null («Ходов нет»). */
+function findHintMove(){
+  /* 1) ход в дом с верхней карты сброса */
+  const wt=state.waste[state.waste.length-1];
+  if(wt){
+    const fi=foundFor(wt);
+    if(fi>=0)return{sc:100,src:[wt],dst:{k:'found',i:fi},from:'waste'};
+  }
+  /* 2) ход в дом с верха колонки */
+  for(let ti=0;ti<7;ti++){
+    const t=state.tab[ti],c=t[t.length-1];
+    if(c&&c.faceUp){
+      const fi=foundFor(c);
+      if(fi>=0)return{sc:90,src:[c],dst:{k:'found',i:fi},from:'t'+ti};
+    }
+  }
+  /* 3) лучший прогресс-ход по столу */
+  const all=listMoves().sort((a,b)=>b.sc-a.sc);
+  for(const mv of all){
+    if(mv.kind)continue;
+    if(mv.sc<=0)continue;
+    return mv;
+  }
+  /* 4) взять из колоды — если в цикле сдачи есть играбельная карта */
+  if(state.stock.length>0&&
+     (pileHasUsefulCard(state.stock)||pileHasUsefulCard(state.waste))){
+    return{kind:'stock'};
+  }
+  /* 5) recycle — при пустом стоке и играбельном сбросе */
+  if(state.stock.length===0&&state.waste.length>0&&pileHasUsefulCard(state.waste)){
+    return{kind:'recycle'};
+  }
+  /* 6) тупик */
+  return null;
 }
 let hintEls=[],hintTimer=null;
 function clearHint(){
@@ -1064,7 +1139,19 @@ function hint(){
   if(state.busy||state.finished)return;
   clearHint();
   const chosen=findHintMove();
-  if(!chosen){toast('Нет ходов');return;}
+  if(!chosen){
+    /* игрок сам нажал «Подсказку» — показываем окно тупика
+       независимо от deadShown */
+    clearHint();
+    sfx('hint');
+    showModal({kicker:'Тупик',title:'Ходов нет',
+      text:'Ходов нет. Перезапустить игру?',
+      buttons:[
+        {label:'Продолжить партию'},
+        {label:'Перезапустить',cls:'primary',fn:()=>newGame(state.drawCount)}
+      ]});
+    return;
+  }
   if(chosen.kind==='stock'){
     hintEls.push(slotEls.stock);
     toast('Возьмите карты из колоды');
@@ -1080,9 +1167,10 @@ function hint(){
   hintTimer=setTimeout(clearHint,2100);
 }
 
-/* автоматическое окно «Ходов нет» — строгая проверка anyLegalMove() */
+/* автоматическое окно «Ходов нет» */
 function checkDead(){
   if(deadShown||state.finished||state.busy)return;
+  if(!layoutOK)return;
   if(state.moves===0)return;
   if(canAutoFinish())return;
   if(anyLegalMove())return;
@@ -1282,7 +1370,7 @@ function startDeal(){
     later(()=>{p.c.faceUp=true;place(p.c,p.c.x,p.c.y,p.c.z);sfx('flip');},p.d+300));
   later(()=>{
     deck.forEach(c=>{c._z=null;c.el.style.transitionDelay='';});
-    state.busy=false;render();startTimer();checkDead();
+    state.busy=false;render();startTimer();
   },k*32+620);
 }
 function newGame(dc){
@@ -1290,7 +1378,7 @@ function newGame(dc){
   if(autoTimer){clearTimeout(autoTimer);autoTimer=null;}
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
-  undoStack=[];lastReal=null;moveTags.clear();
+  undoStack=[];recentMoves=[];moveTags.clear();
   deadShown=false;
   state.drawCount=dc;state.moves=0;state.seconds=0;
   state.finished=false;state.autoModalShown=false;state.busy=true;
@@ -1316,7 +1404,7 @@ function goHome(){
   if(autoTimer){clearTimeout(autoTimer);autoTimer=null;}
   if(layoutRaf){cancelAnimationFrame(layoutRaf);layoutRaf=0;}
   pendingDeal=false;layoutTries=0;drag=null;
-  undoStack=[];lastReal=null;moveTags.clear();
+  undoStack=[];recentMoves=[];moveTags.clear();
   deadShown=false;
   stopTimer();state.busy=false;
   setAutoVisible(false);
