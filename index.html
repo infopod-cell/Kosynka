@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Косынка · Пасьянс Klondike</title>
+<style>
+:root{
+  --cw:80px; --ch:114px; --cr:7px;
+  --red:#d02a35; --black:#23242a; --accent:#39d0ff;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  position:fixed;inset:0;overflow:hidden;
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:radial-gradient(130% 100% at 50% 0%,#12593a 0%,#0b3b24 55%,#062a18 100%);
+  color:#eaf3ec;
+  user-select:none;-webkit-user-select:none;touch-action:manipulation;overscroll-behavior:none;
+}
+/* лёгкая текстура сукна + виньетка */
+body::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.55;
+  background:
+   radial-gradient(90% 60% at 50% 0%,rgba(255,255,255,.05),transparent 60%),
+   repeating-linear-gradient(45deg,rgba(255,255,255,.012) 0 2px,transparent 2px 4px),
+   repeating-linear-gradient(-45deg,rgba(0,0,0,.022) 0 2px,transparent 2px 4px)}
+body::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 50% 45%,transparent 55%,rgba(0,0,0,.38) 100%)}
+
+#app{position:relative;z-index:1;display:flex;flex-direction:column;height:100%;height:100dvh}
+
+/* ==== панели ==== */
+.bar{position:relative;z-index:60;display:flex;align-items:center;gap:8px;padding:7px 12px;
+  background:rgba(0,0,0,.32);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#topbar{justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.08);
+  padding-top:max(7px,env(safe-area-inset-top))}
+#botbar{justify-content:center;gap:7px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,.08);
+  padding-bottom:max(7px,env(safe-area-inset-bottom))}
+.stats{display:flex;gap:16px}
+.stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.05;font-variant-numeric:tabular-nums}
+.stat .lbl{font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;opacity:.55}
+.stat b{font-size:16px;font-weight:800}
+.icon-btn{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.08);color:#eaf3ec;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:transform .08s,background .15s}
+.icon-btn:active{transform:scale(.9)}
+.icon-btn svg{width:20px;height:20px}
+.btn{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:58px;padding:6px 9px;
+  border-radius:11px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:#eaf3ec;
+  font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.02em;cursor:pointer;
+  transition:transform .07s,background .15s}
+.btn svg{width:19px;height:19px}
+.btn:active{transform:scale(.93);background:rgba(255,255,255,.15)}
+.btn[disabled]{opacity:.35;pointer-events:none}
+#btn-auto{display:none;color:#c9f2ff;border-color:rgba(57,208,255,.45);background:rgba(57,208,255,.12)}
+#btn-auto.show{display:inline-flex;animation:autoIn .35s ease}
+@keyframes autoIn{from{transform:scale(.6);opacity:0}}
+
+/* ==== игровое поле ==== */
+#board{position:relative;flex:1;perspective:1500px;touch-action:none;
+  /* overflow намеренно НЕ режем: свечение подсказок должно выходить за границы карт */ }
+/* меню всегда показывается на чистом фоне: ни слотов, ни карт — только сукно */
+#board.bare{visibility:hidden}
+.slot{position:absolute;width:var(--cw);height:var(--ch);border-radius:var(--cr);touch-action:none;
+  background:rgba(0,0,0,.20);display:flex;align-items:center;justify-content:center;
+  box-shadow:inset 0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10)}
+.slot .wm{width:44%;height:44%;color:#fff;opacity:.15}
+.slot .wm.txt{width:auto;height:auto;font-size:calc(var(--cw)*.5);font-weight:900;opacity:.14}
+
+.card{position:absolute;left:0;top:0;width:var(--cw);height:var(--ch);border-radius:var(--cr);
+  transform-style:preserve-3d;will-change:transform;cursor:grab;touch-action:none;z-index:1}
+.card.drag{cursor:grabbing}
+.cf{position:absolute;inset:0;border-radius:var(--cr);overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  border:1px solid rgba(0,0,0,.30);
+  box-shadow:0 1px 2px rgba(0,0,0,.35),0 3px 8px rgba(0,0,0,.30)}
+.cf.face{background:linear-gradient(155deg,#fffef6 0%,#f4f2e6 60%,#e6e4d4 100%);color:var(--black)}
+.card.red .cf.face{color:var(--red)}
+.cf.back{transform:rotateY(180deg);background:#0b2560}
+.cf.back svg{position:absolute;inset:0;width:100%;height:100%}
+.card.drag .cf{box-shadow:0 10px 26px rgba(0,0,0,.55),0 3px 9px rgba(0,0,0,.35)}
+
+/* лицевая сторона: ранг слева сверху, масть справа сверху, крупная масть в центре */
+.corner{position:absolute;left:4.5%;top:3%;text-align:center;line-height:.92;pointer-events:none}
+.corner .rk{display:block;font-family:"Segoe UI Black","Segoe UI",system-ui,Roboto,"Arial Black","Helvetica Neue",Arial,sans-serif;
+  font-weight:900;font-size:calc(var(--cw)*.30);letter-spacing:-.03em}
+.card.r10 .corner .rk{font-size:calc(var(--cw)*.245);letter-spacing:-.07em}
+.corner .st{display:block;width:calc(var(--cw)*.19);height:calc(var(--cw)*.19);margin:1.5% auto 0}
+.suit-tr{position:absolute;right:5%;top:4%;width:calc(var(--cw)*.24);height:calc(var(--cw)*.24);pointer-events:none}
+.cmid{position:absolute;left:50%;top:56%;width:62%;height:62%;transform:translate(-50%,-50%);opacity:.97;pointer-events:none}
+
+/* мягкая подсветка допустимой цели при перетаскивании */
+.card.dropok .cf{box-shadow:0 0 16px 4px rgba(140,225,255,.5),0 3px 8px rgba(0,0,0,.3)}
+.slot.dropok{box-shadow:inset 0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10),0 0 16px 4px rgba(140,225,255,.45)}
+
+/* ==== подсказка: только мягкое голубое свечение, БЕЗ рамок ==== */
+.card.hint{animation:hintPulse .8s ease-in-out 3;z-index:999 !important}
+@keyframes hintPulse{
+  0%,100%{filter:drop-shadow(0 0 0 rgba(0,220,255,0))}
+  50%{filter:drop-shadow(0 0 15px rgba(0,220,255,.95))}
+}
+.slot.hint{animation:hintPulseSlot .8s ease-in-out 3}
+@keyframes hintPulseSlot{
+  0%,100%{box-shadow:inset 0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10)}
+  50%{box-shadow:inset 0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.10),0 0 18px 6px rgba(0,220,255,.85)}
+}
+
+/* лёгкая дрожь: тап по карте, для которой нет хода */
+.card.shake{animation:shakeX .32s ease}
+@keyframes shakeX{
+  0%,100%{translate:0 0}
+  25%{translate:-5px 0}
+  55%{translate:4px 0}
+  80%{translate:-2px 0}
+}
+
+/* ==== тост, конфетти, оверлеи ==== */
+#toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,10px);z-index:1300;
+  background:rgba(6,18,12,.9);border:1px solid rgba(120,220,255,.25);color:#dff6ff;
+  padding:9px 16px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;max-width:92vw;
+  opacity:0;transition:opacity .25s,transform .25s;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#fx{position:fixed;inset:0;z-index:1250;pointer-events:none}
+.overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;
+  background:rgba(3,10,7,.66);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+  opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.show{opacity:1;pointer-events:auto}
+.panel{width:min(88vw,370px);padding:22px 20px;text-align:center;border-radius:18px;
+  background:linear-gradient(170deg,#123a28,#08281a);border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 22px 60px rgba(0,0,0,.55);transform:translateY(10px);transition:transform .2s}
+.overlay.show .panel{transform:none}
+.panel h2{font-size:24px;font-weight:900;margin-bottom:4px}
+.panel .sub{font-size:12.5px;opacity:.65;margin-bottom:14px}
+.mbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:7px 0;padding:12px;
+  border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#eaf3ec;
+  font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:transform .07s,background .15s}
+.mbtn:active{transform:scale(.97)}
+.mbtn.primary{background:linear-gradient(160deg,#1d7a4e,#125c3a);border-color:rgba(120,255,190,.35)}
+.mbtn.ghost{background:transparent}
+/* кнопка с заголовком и мелкой подписью (меню пересдачи) */
+.mbtn.small-cap{flex-direction:column;gap:3px;padding:9px 12px}
+.mbtn.small-cap small{font-size:10.5px;font-weight:600;opacity:.62;letter-spacing:.02em;line-height:1.3}
+.rules{display:none;margin:10px 0;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.22);
+  text-align:left;font-size:12.5px;line-height:1.55;opacity:.9}
+.rules.open{display:block}
+.winstats{display:flex;justify-content:center;gap:18px;margin:12px 0 16px}
+.winstats .stat{align-items:center}
+
+/* ==== домашний экран ==== */
+.panel-home{width:min(92vw,420px);padding:26px 22px 20px}
+/* веер карт: настоящие карты с двойными индексами и портретами J/Q/K */
+.home-fan{position:relative;width:200px;height:94px;margin:2px auto 13px;z-index:0}
+.home-fan::before{content:"";position:absolute;left:50%;top:44%;width:184px;height:84px;
+  transform:translate(-50%,-50%);
+  background:radial-gradient(50% 55% at 50% 46%,rgba(244,200,90,.18),transparent 72%)}
+.home-fan::after{content:"";position:absolute;left:50%;bottom:-8px;width:168px;height:13px;
+  transform:translateX(-50%);border-radius:50%;z-index:-1;
+  background:radial-gradient(50% 50% at 50% 50%,rgba(0,0,0,.45),transparent 72%)}
+.fcard{position:absolute;left:50%;bottom:10px;width:47px;height:66px;margin-left:-23.5px;border-radius:6px;
+  background:linear-gradient(155deg,#fffef8 0%,#f5f3e8 55%,#e0e4dc 100%);
+  border:1px solid rgba(20,30,40,.17);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 5px 12px rgba(0,0,0,.42),0 1.5px 3px rgba(0,0,0,.3);
+  transform:translate(var(--x,0px),var(--y,0px)) rotate(var(--r));transform-origin:50% 122%;
+  animation:fanIn .6s cubic-bezier(.2,1.4,.35,1) backwards;animation-delay:var(--d)}
+.fcor{position:absolute;top:3.5px;left:4.5px;line-height:.9;text-align:center;pointer-events:none}
+.fcor b{display:block;font-size:11.5px;font-weight:800;letter-spacing:-.03em}
+.fcor .fcs{display:block;width:8.5px;height:8.5px;margin:1.5px auto 0}
+.fcor.b2{top:auto;left:auto;bottom:3.5px;right:4.5px;transform:rotate(180deg)}
+.fcard .cmid{top:54%;width:66%;height:66%}
+.fcard.red{color:var(--red)}.fcard.dark{color:#232c38}
+@keyframes fanIn{
+  from{transform:translate(var(--x,0px),calc(var(--y,0px) + 26px)) rotate(var(--r)) scale(.92);opacity:0}
+  to{transform:translate(var(--x,0px),var(--y,0px)) rotate(var(--r))}}
+.home-title{font-size:47px;font-weight:900;letter-spacing:.02em;line-height:1;margin-bottom:7px;
+  background:linear-gradient(180deg,#ffe9a8 8%,#f4c04f 55%,#c98f2e 92%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 3px 5px rgba(0,0,0,.45))}
+.home-sub{font-size:12.5px;opacity:.65;margin-bottom:16px}
+.home-stats{display:flex;gap:9px;margin-bottom:16px}
+.htile{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:11px 4px 9px;
+  border-radius:12px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.10)}
+.htile b{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.htile span{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.55;line-height:1.35}
+.htile.gold b{color:#f4c04f}
+.mbtn.mode{justify-content:flex-start;gap:12px;padding:10px 12px;text-align:left;position:relative}
+.mnum{flex:none;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:18px;font-weight:900;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18)}
+.mtxt{display:flex;flex-direction:column;align-items:flex-start;line-height:1.18}
+.mtxt small{font-size:10.5px;font-weight:600;opacity:.6;letter-spacing:.02em}
+.msel{display:none;margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:#8ff0c4;border:1px solid rgba(120,255,190,.4);border-radius:999px;padding:3px 8px;white-space:nowrap}
+.mbtn.mode.sel .msel{display:inline-block}
+.mbtn.mode.sel{border-color:rgba(120,255,190,.55);box-shadow:0 0 0 1px rgba(120,255,190,.25),0 6px 18px rgba(0,0,0,.3)}
+#w-state{display:inline-block;margin-left:auto}
+#w-state.off{color:#ffb0a6;border-color:rgba(255,130,110,.45)}
+@media (max-width:400px){
+  .stats{gap:10px}.stat b{font-size:14px}
+  .btn{min-width:50px;padding:5px 6px;font-size:10px}
+  .btn svg{width:17px;height:17px}
+}
+</style>
+</head>
+<body>
+<!-- ====== SVG-БИБЛИОТЕКА: масти и рубашка карты ====== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+ <defs>
+  <!-- пики -->
+  <symbol id="su0" viewBox="0 0 100 100"><path fill="currentColor" d="M50 5C36 25 11 40 11 60c0 13 10 23 22 23 6 0 11-2.5 14-7-1 9-5 15-13 20h32c-8-5-12-11-13-20 3 4.5 8 7 14 7 12 0 22-10 22-23C89 40 64 25 50 5Z"/></symbol>
+  <!-- червы -->
+  <symbol id="su1" viewBox="0 0 100 100"><path fill="currentColor" d="M50 95C24 72 7 54 7 35 7 21 18 10 31 10c8 0 15 4 19 11 4-7 11-11 19-11 13 0 24 11 24 25 0 19-17 37-43 60Z"/></symbol>
+  <!-- бубны -->
+  <symbol id="su2" viewBox="0 0 100 100"><path fill="currentColor" d="M50 3c8 19 20 34 35 47-15 13-27 28-35 47-8-19-20-34-35-47 15-13 27-28 35-47Z"/></symbol>
+  <!-- трефы -->
+  <symbol id="su3" viewBox="0 0 100 100"><circle fill="currentColor" cx="50" cy="26" r="20"/><circle fill="currentColor" cx="27" cy="60" r="20"/><circle fill="currentColor" cx="73" cy="60" r="20"/><path fill="currentColor" d="M46 50c0 18-5 33-15 44 10-3 14-1 19 3 5-4 9-6 19-3-10-11-15-26-15-44Z"/></symbol>
+  <!-- повторяющийся узор рубашки -->
+  <pattern id="bp" width="11" height="11" patternUnits="userSpaceOnUse">
+    <rect width="11" height="11" fill="#0e2f6d"/>
+    <path d="M0 5.5 5.5 0 11 5.5 5.5 11Z" fill="none" stroke="#2f63c4" stroke-width="1.1"/>
+    <circle cx="5.5" cy="5.5" r="1.1" fill="#7aa4ea" opacity=".85"/>
+  </pattern>
+  <!-- рубашка целиком (пропорция 1:1.42) -->
+  <symbol id="backart" viewBox="0 0 100 142">
+    <rect width="100" height="142" rx="8" fill="#0b2560"/>
+    <rect x="3.5" y="3.5" width="93" height="135" rx="6" fill="none" stroke="#c9a86a" stroke-width="2.2" opacity=".9"/>
+    <rect x="9" y="9" width="82" height="124" rx="4" fill="url(#bp)"/>
+    <rect x="9" y="9" width="82" height="124" rx="4" fill="none" stroke="#c9a86a" stroke-width="1" opacity=".55"/>
+    <path d="M50 60l9 11-9 11-9-11Z" fill="#c9a86a" opacity=".85"/>
+    <path d="M50 32l5 6-5 6-5-6Z" fill="#c9a86a" opacity=".55"/>
+    <path d="M50 98l5 6-5 6-5-6Z" fill="#c9a86a" opacity=".55"/>
+  </symbol>
+ </defs>
+</svg>
+
+<div id="app">
+  <!-- ====== ВЕРХНЯЯ ПАНЕЛЬ ====== -->
+  <header class="bar" id="topbar">
+    <button id="btn-sound" class="icon-btn" title="Звук вкл/выкл" aria-label="Звук">
+      <svg id="ic-son" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+      <svg id="ic-soff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>
+    </button>
+    <div class="stats">
+      <div class="stat"><span class="lbl">Ходы</span><b id="st-moves">0</b></div>
+      <div class="stat"><span class="lbl">Очки</span><b id="st-score">0</b></div>
+      <div class="stat"><span class="lbl">Время</span><b id="st-time">00:00</b></div>
+    </div>
+  </header>
+
+  <!-- ====== ПОЛЕ (слоты и карты добавляются из JS) ====== -->
+  <main id="board" aria-label="Игровое поле"></main>
+
+  <!-- ====== НИЖНЯЯ ПАНЕЛЬ ====== -->
+  <footer class="bar" id="botbar">
+    <button class="btn" id="btn-home" title="Меню">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Главная</span>
+    </button>
+    <button class="btn" id="btn-redeal" title="Новая раздача">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></svg>
+      <span>Пересдать</span>
+    </button>
+    <button class="btn" id="btn-undo" title="Отменить ход" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H9"/></svg>
+      <span>Отменить</span>
+    </button>
+    <button class="btn" id="btn-hint" title="Подсказка">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.7 10.7c.9.7 1.7 1.7 1.7 2.8v.5h4v-.5c0-1.1.8-2.1 1.7-2.8A6 6 0 0 0 12 3Z"/></svg>
+      <span>Подсказка</span>
+    </button>
+    <button class="btn" id="btn-auto" title="Автозавершение">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5.5v13l8.5-6.5Z"/><path d="M12.5 5.5v13L21 12Z"/></svg>
+      <span>Авто</span>
+    </button>
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<canvas id="fx"></canvas>
+
+<!-- ====== МЕНЮ / ДОМАШНИЙ ЭКРАН ====== -->
+<div class="overlay" id="ov-menu">
+  <div class="panel panel-home">
+    <div class="home-fan" aria-hidden="true"></div>
+    <div class="home-title">Косынка</div>
+    <div class="home-sub">Классический пасьянс Klondike</div>
+    <div class="home-stats">
+      <div class="htile"><b id="h-played">0</b><span>партий<br>сыграно</span></div>
+      <div class="htile gold"><b id="h-won">0</b><span>партий<br>выиграно</span></div>
+      <div class="htile"><b id="h-time">00:00</b><span>время<br>в игре</span></div>
+    </div>
+    <button class="mbtn primary mode" id="m-new1">
+      <span class="mnum">1</span>
+      <span class="mtxt">Играть по одной карте<small>классический режим</small></span>
+      <span class="msel">выбран</span>
+    </button>
+    <button class="mbtn primary mode" id="m-new3">
+      <span class="mnum">3</span>
+      <span class="mtxt">Играть по три карты<small>для опытных игроков</small></span>
+      <span class="msel">выбран</span>
+    </button>
+    <button class="mbtn mode" id="m-winnable">
+      <span class="mtxt">Только решаемые расклады<small>каждая раздача может быть решена</small></span>
+      <span class="msel" id="w-state">вкл</span>
+    </button>
+    <button class="mbtn" id="m-rules">Правила</button>
+    <div class="rules" id="rules">Соберите все карты в четырёх домах по возрастанию масти — от туза до короля.
+В столбцах карты выстраиваются по убыванию с чередованием цветов: красная карта кладётся на чёрную и наоборот.
+На пустой столбец можно положить только короля. Из колоды карты берутся по одной или по три — в зависимости от выбранного режима.
+Перетаскивайте карты мышью или пальцем; одиночное нажатие сразу переносит карту на подходящее место — сначала в дом, затем в столбец.
+Карту из дома можно снять обратно на столбец (тапом или перетаскиванием), чтобы под неё легла другая карта — подсказка тоже учитывает такие обратные ходы. Перед словами «ходов нет» подсказка просчитывает весь цикл сдачи с пересдачами: в режиме «по три» до середины партии не добраться, и такие карты не считаются доступными. С включённым режимом «только решаемые расклады» каждая сдача гарантированно имеет хотя бы одно решение — но найти его нужно самому.</div>
+    <button class="mbtn ghost" id="m-close">Продолжить</button>
+  </div>
+</div>
+
+<!-- ====== ПЕРЕСДАЧА: переиграть ту же партию или сдать новую ====== -->
+<div class="overlay" id="ov-confirm">
+  <div class="panel">
+    <h2 style="font-size:19px">Пересдать?</h2>
+    <div class="sub">Текущая партия будет прервана</div>
+    <button class="mbtn primary small-cap" id="c-replay"><span>Переиграть партию</span><small>та же раздача — ещё одна попытка выиграть</small></button>
+    <button class="mbtn small-cap" id="c-new"><span>Новая партия</span><small>свежая раздача</small></button>
+    <button class="mbtn ghost" id="c-no">Отмена</button>
+  </div>
+</div>
+
+<!-- ====== ПОБЕДА ====== -->
+<div class="overlay" id="ov-win">
+  <div class="panel">
+    <h2>Победа!</h2>
+    <div class="sub">Все карты собраны в домах</div>
+    <div class="winstats">
+      <div class="stat"><span class="lbl">Время</span><b id="w-time">00:00</b></div>
+      <div class="stat"><span class="lbl">Ходы</span><b id="w-moves">0</b></div>
+      <div class="stat"><span class="lbl">Очки</span><b id="w-score">0</b></div>
+    </div>
+    <button class="mbtn primary" id="w-again">Играть снова</button>
+    <button class="mbtn ghost" id="w-menu">В меню</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* Страховка: если в каком-то окружении что-то всё же упадёт,
+   показываем ошибку на экране, а не оставляем пустой стол. */
+window.addEventListener('error', e => {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#7a0b0b;color:#fff;' +
+    'font:12px/1.4 monospace;padding:6px 10px;white-space:pre-wrap';
+  d.textContent = 'Ошибка: ' + (e.message || 'неизвестная');
+  document.body.appendChild(d);
+});
+/* ============================================================
+   КОСЫНКА (Klondike Solitaire) — один файл, без зависимостей.
+   Разделы: утилиты → звук → состояние → раскладка → отрисовка и
+   анимации (requestAnimationFrame) → правила и ходы →
+   перетаскивание → подсказки → отмена → автозавершение → победа
+   → меню и инициализация.
+   ============================================================ */
+
+/* ---------- Утилиты ---------- */
+const $ = s => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* Безопасное хранилище: в песочницах и приватных окнах localStorage
+   может быть запрещён (SecurityError) — тогда используем память. */
+const store = (() => {
+  try {
+    const t = window.localStorage;
+    t.setItem('__klond_t', '1'); t.removeItem('__klond_t');
+    return t;
+  } catch (e) {
+    const mem = {};
+    return {
+      getItem: k => (k in mem ? mem[k] : null),
+      setItem: (k, v) => { mem[k] = String(v); },
+      removeItem: k => { delete mem[k]; }
+    };
+  }
+})();
+
+const Ease = {
+  outCubic:   t => 1 - Math.pow(1 - t, 3),
+  inOutCubic: t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+};
+
+/* ---------- Звук: WebAudio, генерируется на лету, без файлов ---------- */
+let AC = null;
+let muted = store.getItem('klond_mute') === '1';
+function audioInit(){
+  if (!AC){ try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ AC = null; } }
+  if (AC && AC.state === 'suspended') AC.resume();
+}
+function tone(freq, dur, type = 'sine', vol = .2, when = 0, slideTo = 0){
+  if (!AC || muted) return;
+  const t = AC.currentTime + when;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(t); o.stop(t + dur + .03);
+}
+function noiseBurst(dur = .05, vol = .25, freq = 1800, when = 0){
+  if (!AC || muted) return;
+  const t = AC.currentTime + when;
+  const n = Math.max(1, Math.floor(dur * AC.sampleRate));
+  const buf = AC.createBuffer(1, n, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 1.1;
+  const g = AC.createGain(); g.gain.value = vol;
+  src.connect(f); f.connect(g); g.connect(AC.destination);
+  src.start(t);
+}
+const sfx = {
+  pick : () => noiseBurst(.03, .16, 2600),
+  deal : (v = 0) => noiseBurst(.05, .18, 1750 + (v % 5) * 190),
+  flip : () => { noiseBurst(.06, .28, 1500); tone(640, .06, 'triangle', .05); },
+  place: () => { noiseBurst(.045, .22, 900); tone(210, .09, 'sine', .12); },
+  undo : () => tone(330, .12, 'triangle', .10, 0, 200),
+  error: () => tone(150, .14, 'square', .07),
+  win  : () => {
+    /* радостная фанфара: барабанная дробь → восходящие аккорды C–F–G–C
+       → финальный аккорд с блеском колокольчиков */
+    const ch = (ns, when, dur, vol = .15) => ns.forEach(f => tone(f, dur, 'triangle', vol, when));
+    noiseBurst(.10, .16, 480);                                    // дробь
+    ch([261.63, 329.63, 392], .05, .16);                          // до-мажор
+    ch([349.23, 440, 523.25], .25, .16);                          // фа-мажор
+    ch([392, 493.88, 587.33], .45, .16);                          // соль-мажор
+    ch([523.25, 659.25, 783.99, 1046.5], .65, .9, .2);            // финал: до-мажор
+    tone(1318.5, .9, 'triangle', .10, .65);                       // верхняя нота
+    [783.99, 1046.5, 1318.5, 1568].forEach((f, i) =>              // блеск
+      tone(f, .3, 'sine', .07, .82 + i * .085));
+  }
+};
+/* разблокировка аудио на любом первом касании — иначе звук самой первой
+   раздачи (старт из меню) не играет: контекст ещё не создан */
+document.addEventListener('pointerdown', audioInit, { passive: true });
+
+/* ---------- DOM ---------- */
+const board   = $('#board');
+const stMoves = $('#st-moves'), stScore = $('#st-score'), stTime = $('#st-time');
+const btnUndo = $('#btn-undo'), btnAuto = $('#btn-auto');
+const toastEl = $('#toast');
+
+/* «пустой фон» под меню: поле полностью прячется — виден только стол,
+   никакого действия и звуков. Партия при этом сохраняется в P */
+function hideBoard(){ board.classList.add('bare'); }
+function showBoard(){ board.classList.remove('bare'); }
+/* есть ли начатая партия (нужно кнопке «Продолжить») */
+function hasGame(){
+  return P.tab.some(col => col.length) || P.waste.length ||
+         P.stock.length || P.found.some(f => f.length);
+}
+
+/* ---------- Состояние игры ---------- */
+const SUIT_RED = s => s === 1 || s === 2;              // ♥=1, ♦=2 — красные
+const RLBL = ['','A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const P = { stock: [], waste: [], found: [[],[],[],[]], tab: [[],[],[],[],[],[],[]], batch: 0 };
+const CARDS = {};                                      // id -> объект карты
+let MODE = +(store.getItem('klond_mode') || 1); // карт за одну сдачу: 1 или 3
+let winnable = store.getItem('klond_winnable') !== '0'; // подбирать решаемые раздачи (по умолчанию вкл)
+/* накопительная статистика для домашнего экрана */
+let stPlayed = +(store.getItem('klond_played') || 0);
+let stWon    = +(store.getItem('klond_won')    || 0);
+let totalSecs = +(store.getItem('klond_time')  || 0);
+let gameCounted = false;
+let moves = 0, score = 0, secs = 0;
+let started = false, won = false, busy = false;
+let autoFast = false;                                  // ускоренный режим анимации (автозавершение)
+let version = 0;                                       // номер состояния (для сброса подсказок)
+const history = [];                                    // снимки для «Отменить»
+let lastDeal = null;                                   // расклад текущей партии (для «Переиграть партию»)
+
+/* ---------- Раскладка: все размеры считаются из ширины экрана ---------- */
+const L = {};
+function computeLayout(){
+  const bw = board.clientWidth, bh = board.clientHeight;
+  const padX = clamp(bw * .012, 4, 14);
+  let gap = clamp(bw * .014, 4, 16);
+  let cw = (bw - padX * 2 - gap * 6) / 7;              // 7 колонок
+  if (cw > 118){ cw = 118; gap = clamp((bw - padX * 2 - cw * 7) / 6, 6, 44); } // ограничение на десктопе
+  const ch = cw * 1.42;                                // пропорция карты 1 : 1.42
+  Object.assign(L, { bw, bh, cw, ch, gap });
+  L.offX   = (bw - (cw * 7 + gap * 6)) / 2;            // центрирование сетки
+  L.topY   = Math.ceil(ch * .085) + 2;                 // небольшой отступ сверху
+  L.rowGap = clamp(ch * .18, 8, 30);
+  L.tabY   = L.topY + ch + L.rowGap;                   // верх tableau
+  L.downOff = clamp(ch * .13, 5, 24);                  // сдвиг закрытых карт
+  L.upOff   = clamp(ch * .27, 12, 44);                 // сдвиг открытых карт
+  L.colX   = i => L.offX + i * (cw + gap);
+  /* колода справа — на телефоне до неё легче дотянуться большим пальцем;
+     сброс — слева от колоды, дома — по левому краю верхней линии */
+  L.stockX = L.colX(6);
+  L.wasteX = L.colX(5);
+  L.foundX = i => L.colX(i);
+  const rs = document.documentElement.style;
+  rs.setProperty('--cw', cw.toFixed(2) + 'px');
+  rs.setProperty('--ch', ch.toFixed(2) + 'px');
+  rs.setProperty('--cr', (cw * .085).toFixed(2) + 'px');
+  positionSlots();
+}
+
+/* ---------- Слоты (колода, сброс, 4 дома, 7 колонок) ---------- */
+const slots = { stock: null, waste: null, found: [], tab: [] };
+function buildSlots(){
+  const mk = (role, inner) => {
+    const d = document.createElement('div');
+    d.className = 'slot';
+    d.dataset.role = role;
+    if (inner) d.innerHTML = inner;
+    board.appendChild(d);
+    return d;
+  };
+  slots.stock = mk('stock',
+    `<svg class="wm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></svg>`);
+  slots.waste = mk('waste');
+  for (let i = 0; i < 4; i++){
+    const el = mk('found', `<span class="wm txt">A</span>`);
+    el.dataset.idx = i; slots.found.push(el);
+  }
+  for (let i = 0; i < 7; i++){
+    const el = mk('tab');
+    el.dataset.idx = i; slots.tab.push(el);
+  }
+}
+function positionSlots(){
+  const put = (el, x, y) => { el.style.left = x + 'px'; el.style.top = y + 'px'; };
+  put(slots.stock, L.stockX, L.topY);
+  put(slots.waste, L.wasteX, L.topY);
+  slots.found.forEach((el, i) => put(el, L.foundX(i), L.topY));
+  slots.tab.forEach((el, i) => put(el, L.colX(i), L.tabY));
+}
+
+/* faceart-start */
+/* ---------- Фигурные карты (J/Q/K): портреты в стиле комиксов 50–60-х, ретрофутуризм ---------- */
+let FACE_UID = 0;
+const F_INK   = '#20232b';   // комикс-контур
+const F_SKIN  = '#f6c9a0';
+const F_GOLD  = '#f0b429';
+const F_PANEL = '#f9f1dd';   // бумага панели
+const F_ROSE  = '#e94f5a';
+const F_SKY   = '#cfeef7';   // стекло / стекло шлема
+const FACE_PAL = [           // палитры по мастям: ♠ ♥ ♦ ♣
+  { cloth:'#1d3a63', acc:'#457b9d', chrome:'#dbe6f0', gem:'#39d0ff', hair:'#232833' },
+  { cloth:'#b5122b', acc:'#ff8fa3', chrome:'#ffe6d4', gem:'#ff4d6d', hair:'#4a231c' },
+  { cloth:'#d95d39', acc:'#f2c14e', chrome:'#ffedd2', gem:'#ffb400', hair:'#5c3a1e' },
+  { cloth:'#17695c', acc:'#7fd8be', chrome:'#ddf6ee', gem:'#2fd6a4', hair:'#16302a' }
+];
+function fStar(cx, cy, r, fill, sw){
+  sw = sw || 1.2;
+  const k = +(r * .32).toFixed(2);
+  return `<path d="M${cx} ${cy - r}L${cx + k} ${cy - k}L${cx + r} ${cy}L${cx + k} ${cy + k}L${cx} ${cy + r}L${cx - k} ${cy + k}L${cx - r} ${cy}L${cx - k} ${cy - k}Z" fill="${fill}" stroke="${F_INK}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+}
+function fUse(s, color, x, y, w){
+  return `<use href="#su${s}" xlink:href="#su${s}" x="${x}" y="${y}" width="${w}" height="${w}" style="color:${color}"/>`;
+}
+function fArm(d, sleeve){
+  return `<path d="${d}" fill="none" stroke="${F_INK}" stroke-width="6" stroke-linecap="round"/>` +
+         `<path d="${d}" fill="none" stroke="${sleeve}" stroke-width="3.6" stroke-linecap="round"/>`;
+}
+function fHand(cx, cy, r){
+  return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="2"/>`;
+}
+function fBase(C){                       // панель + атомная орбита за головой + полутон + рамка
+  const u = 'fht' + (++FACE_UID);
+  return {
+    defs: `<pattern id="${u}" width="5.5" height="5.5" patternUnits="userSpaceOnUse"><circle cx="1.8" cy="1.8" r="1" fill="${F_INK}" opacity=".14"/></pattern>`,
+    open:
+      `<rect x="2.5" y="2.5" width="95" height="137" rx="9" fill="${F_PANEL}"/>` +
+      `<g transform="rotate(-12 50 38)"><ellipse cx="50" cy="38" rx="29" ry="8.5" fill="none" stroke="#8fa3b8" stroke-width="1.8"/><circle cx="78" cy="35.4" r="3.2" fill="${C.gem}" stroke="${F_INK}" stroke-width="1.5"/></g>`,
+    close:
+      `<rect x="5" y="5" width="90" height="132" rx="7" fill="url(#${u})"/>` +
+      `<rect x="2.5" y="2.5" width="95" height="137" rx="9" fill="none" stroke="${F_INK}" stroke-width="3"/>`
+  };
+}
+function artKing(C, s){                  // КОРОЛЬ — космокомандир: корона-антенна, ракета-скипетр
+  return (
+    fStar(83, 17, 4.6, '#ffffff') + fStar(14.5, 90, 3.4, F_GOLD) + fStar(85.5, 97, 3, '#ffffff') +
+    `<circle cx="12" cy="28" r="1.1" fill="#8fa3b8"/><circle cx="87" cy="47" r="1.1" fill="#8fa3b8"/><circle cx="20" cy="112" r="1.1" fill="#8fa3b8"/>` +
+    `<rect x="41" y="120" width="7.5" height="10" rx="3" fill="${F_INK}"/>` +
+    `<rect x="51.5" y="120" width="7.5" height="10" rx="3" fill="${F_INK}"/>` +
+    `<path d="M50 56 C31 58 26 65 24.5 86 L18 127 Q33 119.5 39.5 125.5 L50 121.5 L60.5 125.5 Q67 119.5 82 127 L75.5 86 C74 65 69 58 50 56 Z" fill="${C.cloth}" stroke="${F_INK}" stroke-width="2.5" stroke-linejoin="round"/>` +
+    `<line x1="27" y1="86" x2="27" y2="71" stroke="${F_INK}" stroke-width="3" stroke-linecap="round"/>` +
+    `<path d="M21.5 64 L15.5 73.5 L21.5 71.5 Z" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="M32.5 64 L38.5 73.5 L32.5 71.5 Z" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="M27 50 C31.5 56 32.5 62 32.5 68 L21.5 68 C21.5 62 22.5 56 27 50 Z" fill="${F_ROSE}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<circle cx="27" cy="60.5" r="2.6" fill="${F_SKY}" stroke="${F_INK}" stroke-width="1.5"/>` +
+    `<rect x="24.2" y="68.5" width="5.6" height="5" rx="1.6" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.5"/>` +
+    `<rect x="34.5" y="57" width="31" height="33" rx="9" fill="${C.chrome}" stroke="${F_INK}" stroke-width="2.5"/>` +
+    fUse(s, C.cloth, 42, 67, 16) +
+    `<rect x="35.5" y="88" width="29" height="5.5" rx="2.5" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.8"/>` +
+    fArm('M37 64 Q28.5 71 27.5 80', C.cloth) + fHand(27.5, 83, 3.6) +
+    fArm('M63 64 Q71.5 72 68.5 82', C.cloth) + fHand(67.5, 84.5, 3.3) +
+    `<circle cx="50" cy="40" r="14" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="2.5"/>` +
+    `<path d="M36.5 43 C36.5 58 42 65 50 65 C58 65 63.5 58 63.5 43 C63.5 52.5 59.5 56.5 55.5 55.8 C57 59.5 53.5 62 50 59 C46.5 62 43 59.5 44.5 55.8 C40.5 56.5 36.5 52.5 36.5 43 Z" fill="#e9e2d2" stroke="${F_INK}" stroke-width="2" stroke-linejoin="round"/>` +
+    `<circle cx="44.7" cy="37.5" r="1.7" fill="${F_INK}"/><circle cx="55.3" cy="37.5" r="1.7" fill="${F_INK}"/>` +
+    `<path d="M41.5 33.2 Q44.7 31.6 47.8 33" fill="none" stroke="${F_INK}" stroke-width="1.9" stroke-linecap="round"/>` +
+    `<path d="M58.5 33.2 Q55.3 31.6 52.2 33" fill="none" stroke="${F_INK}" stroke-width="1.9" stroke-linecap="round"/>` +
+    `<path d="M50 39.5 Q51.6 42.5 50 44" fill="none" stroke="${F_INK}" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<path d="M38.5 27.5 L38.5 16.5 L44.5 21.5 L50 13.5 L55.5 21.5 L61.5 16.5 L61.5 27.5 Z" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="2.4" stroke-linejoin="round"/>` +
+    `<rect x="37.5" y="25" width="25" height="5.4" rx="2" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<circle cx="50" cy="27.7" r="2" fill="${C.gem}" stroke="${F_INK}" stroke-width="1.4"/>` +
+    `<line x1="50" y1="13.5" x2="50" y2="8" stroke="${F_INK}" stroke-width="1.8"/>` +
+    `<circle cx="50" cy="6.6" r="1.9" fill="${F_ROSE}" stroke="${F_INK}" stroke-width="1.4"/>`
+  );
+}
+function artQueen(C){                    // КОРОЛЕВА — космогламур: диадема-антенна, скипетр-орбита
+  return (
+    fStar(17, 24, 4.2, '#ffffff') + fStar(85, 52, 3.4, F_GOLD) + fStar(19, 103, 3, '#ffffff') +
+    `<circle cx="84" cy="24" r="1.1" fill="#8fa3b8"/><circle cx="13" cy="47" r="1.1" fill="#8fa3b8"/><circle cx="81" cy="104" r="1.1" fill="#8fa3b8"/>` +
+    `<rect x="46" y="45" width="8" height="17" rx="3.5" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<path d="M36 82 L64 82 L74 131 Q62.5 123.5 57.5 129.5 L50 124 L42.5 129.5 Q37.5 123.5 26 131 Z" fill="${C.cloth}" stroke="${F_INK}" stroke-width="2.5" stroke-linejoin="round"/>` +
+    `<path d="M39.5 58 L60.5 58 L64 84 L36 84 Z" fill="${C.acc}" stroke="${F_INK}" stroke-width="2.5" stroke-linejoin="round"/>` +
+    `<rect x="36.5" y="81" width="27" height="6" rx="3" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<circle cx="50" cy="84" r="2.8" fill="${F_SKY}" stroke="${F_INK}" stroke-width="1.5"/>` +
+    `<ellipse cx="50" cy="84" rx="5.8" ry="2" fill="none" stroke="${F_INK}" stroke-width="1.2" transform="rotate(-24 50 84)"/>` +
+    `<ellipse cx="50" cy="84" rx="5.8" ry="2" fill="none" stroke="${F_INK}" stroke-width="1.2" transform="rotate(24 50 84)"/>` +
+    `<circle cx="45.5" cy="55.5" r="1.4" fill="${F_GOLD}" stroke="${F_INK}" stroke-width=".9"/>` +
+    `<circle cx="50" cy="56.5" r="1.4" fill="${F_GOLD}" stroke="${F_INK}" stroke-width=".9"/>` +
+    `<circle cx="54.5" cy="55.5" r="1.4" fill="${F_GOLD}" stroke="${F_INK}" stroke-width=".9"/>` +
+    `<line x1="73.5" y1="84" x2="73.5" y2="118" stroke="${F_INK}" stroke-width="3" stroke-linecap="round"/>` +
+    `<rect x="71.2" y="77.5" width="4.6" height="5" rx="1.5" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.4"/>` +
+    `<circle cx="73.5" cy="70.5" r="6.8" fill="${F_SKY}" stroke="${F_INK}" stroke-width="2.4"/>` +
+    fStar(73.5, 70.5, 2.8, F_GOLD, 1) +
+    `<ellipse cx="73.5" cy="70.5" rx="10.2" ry="3.4" fill="none" stroke="${F_INK}" stroke-width="1.7" transform="rotate(-16 73.5 70.5)"/>` +
+    fArm('M39.5 64 Q31.5 71.5 34.5 81.5', C.cloth) + fHand(35, 84, 3.2) +
+    fArm('M60.5 64 Q69 71 72.5 79', C.cloth) + fHand(73, 81.5, 3.5) +
+    `<path d="M36 41 L31.5 47.5 L38.5 46.5 Z" fill="${C.hair}" stroke="${F_INK}" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="M64 41 L68.5 47.5 L61.5 46.5 Z" fill="${C.hair}" stroke="${F_INK}" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<circle cx="50" cy="37" r="16.5" fill="${C.hair}" stroke="${F_INK}" stroke-width="2.5"/>` +
+    `<circle cx="50" cy="41.5" r="11.8" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="2.5"/>` +
+    `<path d="M39.3 36.5 Q42.5 29.5 50 29.5 Q57.5 29.5 60.7 36.5 Q55 31.8 50 33.8 Q45 31.8 39.3 36.5 Z" fill="${C.hair}"/>` +
+    `<path d="M42.5 25.5 L45.5 20 L48 24.5 L50 17.5 L52 24.5 L54.5 20 L57.5 25.5 Z" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="2" stroke-linejoin="round"/>` +
+    `<line x1="50" y1="17.5" x2="50" y2="12" stroke="${F_INK}" stroke-width="1.6"/>` +
+    `<circle cx="50" cy="10.8" r="1.7" fill="${C.gem}" stroke="${F_INK}" stroke-width="1.3"/>` +
+    `<circle cx="45.2" cy="40.5" r="1.6" fill="${F_INK}"/><circle cx="54.8" cy="40.5" r="1.6" fill="${F_INK}"/>` +
+    `<path d="M43 39.3 L41.2 38.1" stroke="${F_INK}" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<path d="M57 39.3 L58.8 38.1" stroke="${F_INK}" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<path d="M46.4 47.3 Q50 45.6 53.6 47.3 Q50 50.4 46.4 47.3 Z" fill="${F_ROSE}" stroke="${F_INK}" stroke-width="1.4" stroke-linejoin="round"/>`
+  );
+}
+function artJack(C, s){                  // ВАЛЕТ — космокадет: стеклянный шлем, бластер, ранец
+  const badge = (s === 1 || s === 2) ? '#c1121f' : F_INK;
+  return (
+    fStar(81, 22, 4.2, '#ffffff') + fStar(86, 62, 3, F_GOLD) + fStar(16, 103, 3, '#ffffff') +
+    `<circle cx="14" cy="24" r="1.1" fill="#8fa3b8"/><circle cx="87" cy="40" r="1.1" fill="#8fa3b8"/><circle cx="22" cy="30" r="1.1" fill="#8fa3b8"/>` +
+    `<path d="M31 76 L24.5 96 L32 93.5 Z" fill="${C.chrome}" stroke="${F_INK}" stroke-width="2" stroke-linejoin="round"/>` +
+    `<path d="M69 76 L75.5 96 L68 93.5 Z" fill="${C.chrome}" stroke="${F_INK}" stroke-width="2" stroke-linejoin="round"/>` +
+    `<rect x="41" y="92" width="8" height="25" rx="3.2" fill="${C.cloth}" stroke="${F_INK}" stroke-width="2.2"/>` +
+    `<rect x="51" y="92" width="8" height="25" rx="3.2" fill="${C.cloth}" stroke="${F_INK}" stroke-width="2.2"/>` +
+    `<rect x="39" y="112" width="11" height="9.5" rx="3.5" fill="${F_INK}"/>` +
+    `<rect x="50" y="112" width="11" height="9.5" rx="3.5" fill="${F_INK}"/>` +
+    `<circle cx="44.5" cy="116.5" r="1.1" fill="${F_GOLD}"/><circle cx="55.5" cy="116.5" r="1.1" fill="${F_GOLD}"/>` +
+    `<rect x="36" y="59" width="28" height="38" rx="9.5" fill="${C.acc}" stroke="${F_INK}" stroke-width="2.5"/>` +
+    `<circle cx="43.5" cy="70.5" r="7.6" fill="${F_PANEL}" stroke="${F_INK}" stroke-width="2"/>` +
+    fUse(s, badge, 38, 65, 11) +
+    `<line x1="50" y1="79" x2="50" y2="93" stroke="${F_INK}" stroke-width="1.7"/>` +
+    `<rect x="36.5" y="87" width="27" height="5.5" rx="2.5" fill="${F_INK}"/>` +
+    `<circle cx="50" cy="89.7" r="2.2" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.2"/>` +
+    fArm('M38.5 65 Q30.5 62 28.5 55.5', C.acc) +
+    `<rect x="13.5" y="44.5" width="17" height="6" rx="3" fill="${C.chrome}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<rect x="10.5" y="43" width="4.5" height="9" rx="2" fill="${F_GOLD}" stroke="${F_INK}" stroke-width="1.7"/>` +
+    `<path d="M27.5 50 L31 56.5 L26 58 L23.5 51.5 Z" fill="${C.cloth}" stroke="${F_INK}" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="M24 51 L20.5 57.5 L26 55.5 Z" fill="${F_ROSE}" stroke="${F_INK}" stroke-width="1.5" stroke-linejoin="round"/>` +
+    fHand(28.3, 53.5, 3.5) +
+    fStar(9.5, 41.5, 3.2, F_GOLD, 1.1) +
+    fArm('M61.5 65 Q69.5 72 66.5 82', C.acc) + fHand(65.8, 84.5, 3.3) +
+    `<rect x="46.5" y="45" width="7" height="12" rx="3" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="1.8"/>` +
+    `<rect x="37.5" y="53.5" width="25" height="5.5" rx="2.5" fill="${C.chrome}" stroke="${F_INK}" stroke-width="2"/>` +
+    `<circle cx="50" cy="40" r="12" fill="${F_SKIN}" stroke="${F_INK}" stroke-width="2.2"/>` +
+    `<circle cx="50" cy="38.5" r="17.5" fill="${F_SKY}" fill-opacity=".3" stroke="${F_INK}" stroke-width="2.5"/>` +
+    `<path d="M38.6 38 Q37.5 26 50 25.5 Q62.5 26 61.4 38 Q60 30.5 53 31 Q57 34 53.5 36.5 Q47 32.5 42 35.8 Q39.3 36.3 38.6 38 Z" fill="${C.hair}"/>` +
+    `<path d="M38.5 31.5 Q42.5 24.5 50 23.3" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" opacity=".9"/>` +
+    `<line x1="50" y1="21" x2="50" y2="15.5" stroke="${F_INK}" stroke-width="1.8"/>` +
+    `<circle cx="50" cy="14.3" r="1.9" fill="${F_ROSE}" stroke="${F_INK}" stroke-width="1.4"/>` +
+    `<circle cx="45.3" cy="39" r="1.7" fill="${F_INK}"/><circle cx="54.7" cy="39" r="1.7" fill="${F_INK}"/>` +
+    `<path d="M42.5 35 Q45.3 33.6 48 35" fill="none" stroke="${F_INK}" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<path d="M57.5 35 Q54.7 33.6 52 35" fill="none" stroke="${F_INK}" stroke-width="1.7" stroke-linecap="round"/>` +
+    `<circle cx="42.8" cy="43.5" r=".8" fill="${F_INK}" opacity=".45"/><circle cx="44.5" cy="44.8" r=".8" fill="${F_INK}" opacity=".45"/>` +
+    `<circle cx="57.2" cy="43.5" r=".8" fill="${F_INK}" opacity=".45"/><circle cx="55.5" cy="44.8" r=".8" fill="${F_INK}" opacity=".45"/>` +
+    `<path d="M45.5 45.5 Q50 49 54.5 45.5" fill="none" stroke="${F_INK}" stroke-width="2" stroke-linecap="round"/>`
+  );
+}
+function faceArt(r, s){
+  const C = FACE_PAL[s];
+  const B = fBase(C);
+  const who = r === 13 ? artKing(C, s) : r === 12 ? artQueen(C) : artJack(C, s);
+  return `<svg class="cmid" viewBox="0 0 100 142" aria-hidden="true">${B.defs}${B.open}${who}${B.close}</svg>`;
+}
+/* faceart-end */
+
+/* ---------- Карты: 52 DOM-элемента создаются один раз ---------- */
+function buildCards(){
+  const frag = document.createDocumentFragment();
+  for (let s = 0; s < 4; s++) for (let r = 1; r <= 13; r++){
+    const id = s * 13 + r;
+    const mid = r >= 11 ? faceArt(r, s)
+      : `<svg class="cmid" viewBox="0 0 100 100"><use href="#su${s}" xlink:href="#su${s}"/></svg>`;
+    const el = document.createElement('div');
+    el.className = 'card' + (SUIT_RED(s) ? ' red' : '') + (r === 10 ? ' r10' : '');
+    el.dataset.id = id;
+    el.innerHTML =
+      `<div class="cf face">
+         <div class="corner"><span class="rk">${RLBL[r]}</span><svg class="st" viewBox="0 0 100 100"><use href="#su${s}" xlink:href="#su${s}"/></svg></div>
+         <svg class="suit-tr" viewBox="0 0 100 100"><use href="#su${s}" xlink:href="#su${s}"/></svg>
+         ${mid}
+       </div>
+       <div class="cf back"><svg viewBox="0 0 100 142" preserveAspectRatio="none"><use href="#backart" xlink:href="#backart"/></svg></div>`;
+    CARDS[id] = { id, s, r, up: false, el, x: 0, y: 0, z: 0, rot: 180, sc: 1, boost: 0, anim: 0 };
+    frag.appendChild(el);
+  }
+  board.appendChild(frag);
+}
+
+/* ---------- Веер карт на домашнем экране (10♦ J♣ Q♥ K♠ A♦) ---------- */
+/* Собирается из JS, чтобы использовать те же портреты J/Q/K (faceArt),
+   что и в игре: карты выглядят как настоящие — двойные индексы,
+   у фигурных ретро-портреты, у туза и десятки крупная масть в центре */
+function buildHomeFan(){
+  const fan = document.querySelector('.home-fan');
+  if (!fan) return;
+  const spec = [
+    { r: 10, s: 2, x: -38, y: 5.5, rot: -26, d: .00 },   // 10♦
+    { r: 11, s: 3, x: -19, y: 2.5, rot: -13, d: .07 },   // J♣
+    { r: 12, s: 1, x:   0, y: 0,   rot:   0, d: .14 },   // Q♥
+    { r: 13, s: 0, x:  19, y: 2.5, rot:  13, d: .21 },   // K♠
+    { r: 1,  s: 2, x:  38, y: 5.5, rot:  26, d: .28 }    // A♦
+  ];
+  fan.innerHTML = spec.map(c => {
+    const use = `<use href="#su${c.s}" xlink:href="#su${c.s}"/>`;
+    const mid = c.r >= 11 ? faceArt(c.r, c.s)
+      : `<svg class="cmid" viewBox="0 0 100 100">${use}</svg>`;
+    const cor = `<span class="fcor"><b>${RLBL[c.r]}</b><svg class="fcs" viewBox="0 0 100 100">${use}</svg></span>`;
+    return `<div class="fcard${SUIT_RED(c.s) ? ' red' : ''}" style="--x:${c.x}px;--y:${c.y}px;--r:${c.rot}deg;--d:${c.d.toFixed(2)}s">` +
+           cor + mid + cor.replace('fcor"', 'fcor b2"') + `</div>`;
+  }).join('');
+}
+
+/* ---------- Отрисовка и анимации (все через requestAnimationFrame) ---------- */
+function paint(c){
+  c.el.style.transform = `translate3d(${c.x}px,${c.y}px,0) rotateY(${c.rot}deg) scale(${c.sc})`;
+}
+function applyZ(c){ c.el.style.zIndex = c.z + c.boost; }
+
+function animateCard(c, tx, ty, trot, dur = 200, opts = {}){
+  if (opts.boost){ c.boost = opts.boost; applyZ(c); }
+  const fx = c.x, fy = c.y, fr = c.rot;
+  if (!opts.force && Math.abs(tx - fx) < .5 && Math.abs(ty - fy) < .5 && Math.abs(trot - fr) < .5){
+    c.x = tx; c.y = ty; c.rot = trot; c.boost = 0; c.sc = 1;
+    paint(c); applyZ(c);
+    return Promise.resolve();
+  }
+  const gen = ++c.anim;                                // защита: новая анимация перехватывает старую
+  const ease = opts.ease || Ease.outCubic;
+  return new Promise(res => {
+    const t0 = performance.now();
+    const loop = now => {
+      if (gen !== c.anim){ res(); return; }
+      const t = clamp((now - t0) / dur, 0, 1);
+      const e = ease(t);
+      c.x = fx + (tx - fx) * e;
+      c.y = fy + (ty - fy) * e;
+      c.rot = fr + (trot - fr) * e;
+      paint(c);
+      if (t < 1) requestAnimationFrame(loop);
+      else { c.boost = 0; applyZ(c); res(); }
+    };
+    requestAnimationFrame(loop);
+  });
+}
+
+/* ---------- Координаты карт в стопках ---------- */
+function tabOffsets(col){
+  /* сдвиги подгоняются, чтобы длинная колонка уместилась по высоте экрана */
+  let d = L.downOff, u = L.upOff;
+  const maxH = L.bh - L.tabY - 10;
+  let need = L.ch;
+  for (let k = 0; k < col.length - 1; k++) need += col[k].up ? u : d;
+  if (need > maxH && need > L.ch){
+    const s = clamp((maxH - L.ch) / (need - L.ch), .35, 1);
+    d *= s; u *= s;
+  }
+  return { d, u };
+}
+function wastePos(j, len){
+  /* ВЕЕР ВЛЕВО, В ОДНУ ЛИНИЮ: верхняя (играбельная) карта сдачи лежит на слоте
+     у колоды, каждая предыдущая — ступенькой ЛЕВЕЕ. Левый угол с рангом и мастью
+     остаётся виден у всех карт партии. len — длина сброса «как после полной
+     сдачи» (нужна при анимации раздачи, пока партия ещё не легла целиком) */
+  len = len || P.waste.length;
+  const bs = clamp(P.batch, 0, len);
+  if (j < bs) return [L.wasteX, L.topY];
+  const d = len - 1 - j;                                // 0 у верхней карты сдачи
+  const k = Math.min(d, 2);
+  return [L.wasteX - k * L.cw * .26, L.topY];
+}
+function pileArr(ref){
+  return ref.t === 'stock' ? P.stock
+       : ref.t === 'waste' ? P.waste
+       : ref.t === 'found' ? P.found[ref.i]
+       : P.tab[ref.i];
+}
+function pilePos(ref, j){
+  const arr = pileArr(ref);
+  if (ref.t === 'found') return [L.foundX(ref.i), L.topY];
+  if (ref.t === 'waste') return wastePos(j);
+  if (ref.t === 'stock') return [L.stockX, L.topY];
+  const o = tabOffsets(arr);
+  let y = L.tabY;
+  for (let k = 0; k < j; k++) y += arr[k].up ? o.u : o.d;
+  return [L.colX(ref.i), y];
+}
+function layoutPile(t, i, animate){
+  const arr = pileArr({ t, i });
+  /* сброс и дома — над колодой и по z: карты в полёте при анимациях
+     всегда оказываются поверх стопки колоды */
+  const zb = (t === 'waste' || t === 'found') ? 100 : 0;
+  arr.forEach((c, j) => {
+    let x, y;
+    if (t === 'stock')     { x = L.stockX;    y = L.topY; }
+    else if (t === 'waste'){ [x, y] = wastePos(j); }
+    else if (t === 'found'){ x = L.foundX(i); y = L.topY; }
+    else                   { [x, y] = pilePos({ t: 'tab', i }, j); }
+    c.z = zb + j;
+    const rot = c.up ? 0 : 180;
+    if (animate) animateCard(c, x, y, rot, 190);
+    else { c.x = x; c.y = y; c.rot = rot; c.boost = 0; c.sc = 1; paint(c); applyZ(c); }
+  });
+}
+function layoutAll(animate = false){
+  layoutPile('stock', 0, animate);
+  layoutPile('waste', 0, animate);
+  for (let i = 0; i < 4; i++) layoutPile('found', i, animate);
+  for (let i = 0; i < 7; i++) layoutPile('tab', i, animate);
+}
+/* ---------- Поиск карты и правила Klondike ---------- */
+function findLoc(c){
+  let j = P.stock.indexOf(c); if (j > -1) return { t: 'stock', i: 0, j };
+  j = P.waste.indexOf(c);     if (j > -1) return { t: 'waste', i: 0, j };
+  for (let i = 0; i < 4; i++){ j = P.found[i].indexOf(c); if (j > -1) return { t: 'found', i, j }; }
+  for (let i = 0; i < 7; i++){ j = P.tab[i].indexOf(c);   if (j > -1) return { t: 'tab', i, j }; }
+  return null;
+}
+function canDropTab(lead, ti){
+  const col = P.tab[ti];
+  if (!col.length) return lead.r === 13;               // пустой столбец — только король
+  const top = col[col.length - 1];
+  return top.up && top.r === lead.r + 1 && SUIT_RED(top.s) !== SUIT_RED(lead.s); // убывание + чередование цветов
+}
+function canDropFound(lead, fi){
+  const f = P.found[fi];
+  if (!f.length) return lead.r === 1;                  // пустой дом — только туз
+  const top = f[f.length - 1];
+  return top.s === lead.s && top.r === lead.r - 1;     // та же масть, по возрастанию
+}
+
+/* ---------- Счётчики: ходы, очки, время ---------- */
+function fmtTime(s){
+  const m = Math.floor(s / 60), ss = s % 60, h = Math.floor(m / 60);
+  return h ? `${h}:${String(m % 60).padStart(2,'0')}:${String(ss).padStart(2,'0')}`
+           : `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+}
+function updateHUD(){ stMoves.textContent = moves; stScore.textContent = score; }
+function startTimer(){ started = true; }
+setInterval(() => {
+  if (started && !won && !document.hidden && !anyOverlay()){
+    secs++; stTime.textContent = fmtTime(secs);
+    totalSecs++;                                   // суммарное время в игре
+    if (totalSecs % 15 === 0) store.setItem('klond_time', totalSecs);
+  }
+}, 1000);
+
+/* ---------- Статистика и домашний экран ---------- */
+/* партия считается «сыгранной», когда в ней были ходы и она завершилась
+   победой либо была заменена новой раздачей */
+function countGame(){
+  stPlayed++;
+  store.setItem('klond_played', stPlayed);
+}
+function addWin(){
+  if (!gameCounted){ stPlayed++; gameCounted = true; }
+  stWon++;
+  store.setItem('klond_played', stPlayed);
+  store.setItem('klond_won', stWon);
+}
+function syncHomeStats(){
+  $('#h-played').textContent = stPlayed;
+  $('#h-won').textContent = stWon;
+  $('#h-time').textContent = fmtTime(totalSecs);
+  $('#m-new1').classList.toggle('sel', MODE === 1);
+  $('#m-new3').classList.toggle('sel', MODE === 3);
+}
+function openMenu(){
+  hideBoard();                               /* меню всегда на чистом фоне */
+  syncHomeStats();
+  $('#m-close').textContent = hasGame() ? 'Продолжить' : 'Играть';
+  showOverlay('#ov-menu');
+}
+window.addEventListener('pagehide', () => store.setItem('klond_time', totalSecs));
+
+/* ---------- Снимки состояния для «Отменить» ---------- */
+function snapshot(){
+  history.push(JSON.stringify({
+    s: P.stock.map(c => c.id),
+    w: P.waste.map(c => c.id),
+    f: P.found.map(f => f.map(c => c.id)),
+    t: P.tab.map(t => t.map(c => c.id)),
+    u: Object.values(CARDS).filter(c => c.up).map(c => c.id),
+    b: P.batch, sc: score, m: moves
+  }));
+  if (history.length > 400) history.shift();
+  btnUndo.disabled = false;
+}
+function undo(){
+  if (!history.length || busy || won || drag) return;
+  const st = JSON.parse(history.pop());
+  const put = (arr, ids) => { arr.length = 0; for (const id of ids) arr.push(CARDS[id]); };
+  put(P.stock, st.s); put(P.waste, st.w);
+  st.f.forEach((ids, i) => put(P.found[i], ids));
+  st.t.forEach((ids, i) => put(P.tab[i], ids));
+  P.batch = st.b; score = st.sc; moves = st.m;
+  const up = new Set(st.u);
+  Object.values(CARDS).forEach(c => { c.up = up.has(c.id); });
+  version++; hintReset();
+  layoutAll(true);
+  updateHUD(); updateAuto();
+  btnUndo.disabled = !history.length;
+  sfx.undo();
+}
+
+/* ---------- Выполнение хода ---------- */
+function doMove(srcRef, stack, dstRef){
+  snapshot();
+  const src = pileArr(srcRef), dst = pileArr(dstRef);
+  src.splice(src.indexOf(stack[0]), stack.length);
+  const base = dst.length;
+  const zb = dstRef.t === 'found' ? 100 : 0;          // дома — выше колоды
+  stack.forEach((c, k) => { dst.push(c); c.z = zb + base + k; });
+  moves++; version++; startTimer();
+
+  /* очки — классическая схема Windows */
+  if (dstRef.t === 'found') score += 10;                       // в дом
+  else if (dstRef.t === 'tab'){
+    if (srcRef.t === 'waste')      score += 5;                 // сброс → столбец
+    else if (srcRef.t === 'found') score -= 15;                // дом → столбец
+  }
+  score = Math.max(0, score);
+
+  /* вскрытие закрытой карты с анимацией переворота */
+  if (srcRef.t === 'tab' && src.length && !src[src.length - 1].up){
+    const c = src[src.length - 1];
+    c.up = true; score += 5;
+    animateCard(c, c.x, c.y, 0, autoFast ? 90 : 300, { force: true, ease: Ease.inOutCubic });
+  }
+
+  /* переносимые карты летят на свои места поверх остальных */
+  stack.forEach((c, k) => {
+    const [tx, ty] = pilePos(dstRef, base + k);
+    animateCard(c, tx, ty, 0, autoFast ? 70 : 230, { boost: 1500 + k });
+  });
+
+  /* карта ушла из сброса → партия сдвигается на шаг вправо:
+     следующая играбельная ложится на слот и снова накрывает
+     карты прошлой раздачи, чтобы они не торчали у колоды */
+  if (srcRef.t === 'waste') layoutPile('waste', 0, true);
+
+  if (autoFast){ if (moves % 3 === 0) sfx.deal(moves); } else sfx.place();
+  updateHUD(); updateAuto(); checkWin();
+}
+
+/* ---------- Колода: сдача (по 1 / по 3) и переворот сброса ---------- */
+function drawOrRecycle(){
+  if (busy || won || drag) return;
+
+  /* колода пуста → переворачиваем сброс */
+  if (!P.stock.length){
+    if (!P.waste.length) return;
+    snapshot();
+    score = Math.max(0, score - (MODE === 3 ? 20 : 100));      // штраф за рецикл
+    moves++; version++; startTimer();
+    while (P.waste.length){ const c = P.waste.pop(); c.up = false; P.stock.push(c); }
+    P.batch = 0;
+    P.stock.forEach((c, j) => { c.z = j; });
+    /* упрощённый возврат: карты сразу закрытыми БЫСТРО заезжают в колоду, без переворота */
+    P.stock.forEach((c, j) => {
+      c.rot = 180; paint(c);
+      setTimeout(() => { animateCard(c, L.stockX, L.topY, 180, 140, { boost: 1200 + j }); }, j * 9);
+    });
+    sfx.flip(); updateHUD(); updateAuto();
+    return;
+  }
+
+  /* обычная сдача */
+  snapshot();
+  const n = Math.min(MODE, P.stock.length);
+  P.batch = P.waste.length;                                    // начало текущей партии карт (для веера)
+  for (let i = 0; i < n; i++){
+    const c = P.stock.pop();
+    c.up = true;
+    c.rot = 0;                                        // выезжает уже открытой — без переворота
+    c.z = 100 + P.waste.length;                       // сброс всегда поверх колоды
+    P.waste.push(c);
+    const [tx, ty] = wastePos(P.batch + i, P.batch + n);   // сразу конечная позиция в веере
+    setTimeout(() => { paint(c); sfx.deal(i); animateCard(c, tx, ty, 0, 150, { boost: 2000 + i }); }, i * 60);
+  }
+  moves++; version++; startTimer();
+  layoutPile('stock', 0, false);
+  /* карты под текущей партией подныривают под слот сброса */
+  P.waste.forEach((c, j) => {
+    if (j < P.batch){
+      c.z = 100 + j;
+      const [tx, ty] = wastePos(j);
+      if (Math.abs(tx - c.x) > .5 || Math.abs(ty - c.y) > .5) animateCard(c, tx, ty, 0, 200);
+    }
+  });
+  updateHUD(); updateAuto();
+}
+/* ---------- Перетаскивание: мышь + touch через Pointer Events ---------- */
+let drag = null;
+
+function cardFromEvent(e){
+  const el = e.target && e.target.closest ? e.target.closest('.card') : null;
+  return el ? CARDS[el.dataset.id] : null;
+}
+function stackFrom(c){
+  const loc = findLoc(c);
+  if (!loc || loc.t === 'stock') return null;
+  if (loc.t === 'waste') return loc.j === P.waste.length - 1 ? { stack: [c], loc } : null;
+  if (loc.t === 'found') return loc.j === P.found[loc.i].length - 1 ? { stack: [c], loc } : null;
+  if (!c.up) return null;                              // закрытые карты не таскаем
+  return { stack: P.tab[loc.i].slice(loc.j), loc };    // открытая серия целиком
+}
+function onDown(e){
+  audioInit();
+  if (busy || won || anyOverlay() || drag) return;
+  if (e.button != null && e.button !== 0) return;
+  const c = cardFromEvent(e);
+  if (!c){
+    const sl = e.target.closest ? e.target.closest('.slot') : null;
+    drag = sl ? { kind: 'slot', role: sl.dataset.role, pid: e.pointerId } : null;
+    return;
+  }
+  const sf = stackFrom(c);
+  if (!sf){ drag = { kind: 'tap', card: c, pid: e.pointerId }; return; }
+  drag = {
+    kind: 'drag', stack: sf.stack, loc: sf.loc, lead: c, pid: e.pointerId,
+    sx: e.clientX, sy: e.clientY, moved: false, hover: null,
+    orig: sf.stack.map(cc => ({ x: cc.x, y: cc.y }))
+  };
+  e.preventDefault();
+}
+function onMove(e){
+  if (!drag || drag.kind !== 'drag' || e.pointerId !== drag.pid) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (!drag.moved){
+    if (Math.hypot(dx, dy) < 6) return;                // порог начала перетаскивания
+    drag.moved = true;
+    drag.stack.forEach((c, k) => {
+      c.sc = 1.045; c.boost = 3000 + k;                // приподнимаем серию
+      c.el.classList.add('drag');
+      paint(c); applyZ(c);
+    });
+    sfx.pick();
+  }
+  e.preventDefault();
+  drag.stack.forEach((c, k) => {
+    c.x = clamp(drag.orig[k].x + dx, -L.cw * .35, L.bw - L.cw * .6);
+    c.y = clamp(drag.orig[k].y + dy, 2, L.bh - L.ch * .5);
+    paint(c);
+  });
+  updateHover();
+}
+function onUp(e){
+  if (!drag) return;
+  if (drag.pid != null && e.pointerId != null && e.pointerId !== drag.pid) return; // вторым пальцем не сбиваем
+  const d = drag; drag = null;
+  if (d.kind === 'drag'){
+    if (d.hover) zoneEl(d.hover).classList.remove('dropok');
+    d.stack.forEach(c => { c.sc = 1; c.el.classList.remove('drag'); paint(c); });
+    if (d.moved){
+      const z = findTarget(d);
+      if (z){
+        doMove(d.loc, d.stack, z.t === 'found' ? { t: 'found', i: z.i } : { t: 'tab', i: z.i });
+      } else {
+        /* плавный возврат на исходную позицию */
+        d.stack.forEach((c, k) => {
+          c.boost = 2500 + k; applyZ(c);
+          animateCard(c, d.orig[k].x, d.orig[k].y, 0, 260, { ease: Ease.outCubic });
+        });
+        sfx.error();
+      }
+    } else {
+      handleTap(d.lead);
+    }
+  } else if (d.kind === 'tap'){
+    if (d.card) handleTap(d.card);
+  } else if (d.kind === 'slot'){
+    if (d.role === 'stock') drawOrRecycle();           // клик по пустой колоде
+  }
+}
+
+/* --- тап/клик: мгновенный перенос карты на подходящее место --- */
+function handleTap(c){
+  const loc = findLoc(c);
+  if (loc && loc.t === 'stock'){ drawOrRecycle(); return; }
+  if (!loc) return;
+  if (loc.t === 'found'){
+    /* тап по дому — снимаем карту на столбец только как подготовительный ход:
+       под неё потом ляжет карта из колоды/сброса/столбца, которой сейчас некуда */
+    if (!(lastHint && lastHint.id === c.id && lastHint.to === 'f' + loc.i)){
+      const cols = pullDownColumns(c);
+      if (cols.length){
+        const d = lastHint && lastHint.id === c.id && cols.includes(lastHint.toT)
+          ? lastHint.toT : cols[0];
+        doMove(loc, [c], { t: 'tab', i: d });
+        return;
+      }
+    }
+    shakeCard(c); return;
+  }
+  const sf = stackFrom(c);
+  if (!sf){ shakeCard(c); return; }                    // эту карту нельзя двигать
+  /* 1) в дом — самый желанный ход */
+  if (sf.stack.length === 1){
+    for (let i = 0; i < 4; i++){
+      if (canDropFound(c, i)){ doMove(loc, [c], { t: 'found', i }); return; }
+    }
+  }
+  /* 2) в столбец — первое подходящее место */
+  for (let d = 0; d < 7; d++){
+    if (loc.t === 'tab' && loc.i === d) continue;
+    if (!P.tab[d].length && loc.t === 'tab' && loc.j === 0) continue;   // холостой король
+    if (canDropTab(c, d)){ doMove(loc, sf.stack, { t: 'tab', i: d }); return; }
+  }
+  shakeCard(c);                                        // хода нет — лёгкая дрожь
+}
+function shakeCard(c){
+  c.el.classList.remove('shake');
+  void c.el.offsetWidth;                               // перезапуск CSS-анимации
+  c.el.classList.add('shake');
+  setTimeout(() => c.el.classList.remove('shake'), 340);
+}
+
+/* ---------- Определение цели сброса по площади пересечения ---------- */
+function dropZones(){
+  const zs = [];
+  for (let i = 0; i < 4; i++) zs.push({ t: 'found', i, x: L.foundX(i), y: L.topY, w: L.cw, h: L.ch });
+  for (let i = 0; i < 7; i++){
+    const col = P.tab[i];
+    let h = L.ch * 1.15;
+    if (col.length){
+      const top = col[col.length - 1];
+      h = Math.max(h, top.y + L.ch * 1.25 - L.tabY);
+    }
+    zs.push({ t: 'tab', i, x: L.colX(i), y: L.tabY, w: L.cw, h });
+  }
+  return zs;
+}
+function zoneEl(z){
+  if (z.t === 'found'){ const f = P.found[z.i]; return f.length ? f[f.length - 1].el : slots.found[z.i]; }
+  const col = P.tab[z.i]; return col.length ? col[col.length - 1].el : slots.tab[z.i];
+}
+function findTarget(d){
+  const lead = d.lead, r = { x: lead.x, y: lead.y, w: L.cw, h: L.ch };
+  let best = null, bestA = L.cw * L.ch * .12;          // минимальное перекрытие — 12% карты
+  for (const z of dropZones()){
+    if (z.t === 'found' && d.stack.length > 1) continue;              // в дом — только по одной
+    if (z.t === 'tab'   && d.loc.t === 'tab' && d.loc.i === z.i) continue;
+    if (z.t === 'found' && d.loc.t === 'found' && d.loc.i === z.i) continue;
+    const ox = Math.min(r.x + r.w, z.x + z.w) - Math.max(r.x, z.x);
+    const oy = Math.min(r.y + r.h, z.y + z.h) - Math.max(r.y, z.y);
+    if (ox <= 0 || oy <= 0) continue;
+    const a = ox * oy;
+    if (a <= bestA) continue;
+    const ok = z.t === 'found' ? canDropFound(lead, z.i) : canDropTab(lead, z.i);
+    if (ok){ best = z; bestA = a; }
+  }
+  return best;
+}
+function updateHover(){
+  const z = findTarget(drag);
+  const prev = drag.hover;
+  if (prev && (!z || z.t !== prev.t || z.i !== prev.i)) zoneEl(prev).classList.remove('dropok');
+  if (z && (!prev || z.t !== prev.t || z.i !== prev.i)) zoneEl(z).classList.add('dropok');
+  drag.hover = z;
+}
+
+/* ---------- Подсказки ---------- */
+let hintTimer = null, hintVer = -1, hintShown = [], lastHint = null;
+function hintReset(){ hintVer = -1; hintShown = []; lastHint = null; clearHintEls(); }
+function clearHintEls(){
+  document.querySelectorAll('.card.hint, .slot.hint').forEach(el => el.classList.remove('hint'));
+  clearTimeout(hintTimer);
+}
+/* --- помощники поиска ходов: просчёт всей колоды и обратных ходов из домов --- */
+function tabLanding(c){
+  for (let d = 0; d < 7; d++) if (canDropTab(c, d)) return true;
+  return false;
+}
+function foundLanding(c){
+  for (let f = 0; f < 4; f++) if (canDropFound(c, f)) return true;
+  return false;
+}
+function kingWantsSpotNow(){
+  if (P.tab.some(col => !col.length)) return false;                        // пустой столбец уже есть
+  if (P.waste.length && P.waste[P.waste.length - 1].r === 13) return true; // король сверху сброса
+  for (let i = 0; i < 7; i++){
+    const col = P.tab[i];
+    for (let k = 1; k < col.length; k++)
+      if (col[k].up && col[k].r === 13 && !col[k - 1].up) return true;     // король на закрытой карте
+  }
+  return false;
+}
+/* какие карты МОГУТ оказаться верхними в сбросе при дальнейшей сдаче.
+   Симулируем настоящий цикл «сдача → переворот сброса» (при пересдаче
+   порядок карт сохраняется — см. drawOrRecycle). Партия «по 3» открывает
+   только третью карту: карты из середины партии без игры недостижимы,
+   поэтому проверять ВСЕ карты колоды нельзя — иначе подсказка вечно
+   зовёт к колоде, хотя нужная карта никогда не всплывёт.
+   Текущая верхняя карта сброса не считается — для неё есть прямые подсказки */
+function reachableTops(){
+  const stock = P.stock.slice(), waste = P.waste.slice();
+  const cur = waste.length ? waste[waste.length - 1].id : -1;
+  const tops = [];
+  if (!stock.length && !waste.length) return tops;
+  const steps = (stock.length + waste.length) * 2 + MODE + 2;   // два полных круга с запасом
+  for (let n = 0; n < steps; n++){
+    if (!stock.length){
+      if (!waste.length) break;
+      while (waste.length) stock.push(waste.pop());             // переворот сброса, как в игре
+    }
+    for (let i = 0; i < MODE && stock.length; i++) waste.push(stock.pop());
+    const top = waste[waste.length - 1];
+    if (top.id !== cur && !tops.some(c => c.id === top.id)) tops.push(top);
+  }
+  return tops;
+}
+/* просчёт колоды с учётом цикла сдачи: есть ли ход хотя бы у одной карты,
+   которая РЕАЛЬНО может оказаться верхней в сбросе (включая пересдачи) */
+function deckHasMoves(){
+  for (const c of reachableTops()){
+    for (let f = 0; f < 4; f++) if (canDropFound(c, f)) return true;
+    for (let d = 0; d < 7; d++) if (canDropTab(c, d)) return true;
+  }
+  return false;
+}
+/* продуктивная серия столбца, у которой сейчас нет посадки, но она ляжет
+   на снятую из дома карту F (d — столбец, куда встанет F) */
+function tabLeadNeedsPull(F, d){
+  const kingWants = kingWantsSpotNow();
+  for (let i = 0; i < 7; i++){
+    if (i === d) continue;                             // своя колонка не считается
+    const col = P.tab[i];
+    for (let k = 0; k < col.length; k++){
+      if (!col[k].up) continue;
+      const lead = col[k];
+      const reveals = k > 0 && !col[k - 1].up;
+      const below = k > 0 ? col[k - 1] : null;
+      let belowToFound = false;
+      if (below && below.up){
+        for (let f = 0; f < 4; f++) if (canDropFound(below, f)){ belowToFound = true; break; }
+      }
+      const freesForKing = k === 0 && kingWants;
+      if (!reveals && !belowToFound && !freesForKing) continue;
+      if (F.r === lead.r + 1 && SUIT_RED(F.s) !== SUIT_RED(lead.s) && !tabLanding(lead)) return true;
+    }
+  }
+  return false;
+}
+/* столбцы, на которые стоит временно снять карту F из дома:
+   после снятия под неё ляжет карта, которой сейчас нет места посадки
+   (верх сброса, карта колоды, которая реально всплывёт при сдаче,
+   либо продуктивная серия столбца) */
+function pullDownColumns(F){
+  const needs = c => F.r === c.r + 1 && SUIT_RED(F.s) !== SUIT_RED(c.s);
+  const res = [];
+  for (let d = 0; d < 7; d++){
+    if (!canDropTab(F, d)) continue;
+    let useful = false;
+    if (P.waste.length){
+      const c = P.waste[P.waste.length - 1];
+      if (needs(c) && !tabLanding(c) && !foundLanding(c)) useful = true;
+    }
+    if (!useful) for (const c of reachableTops()){
+      if (needs(c) && !tabLanding(c) && !foundLanding(c)){ useful = true; break; }
+    }
+    if (!useful) useful = tabLeadNeedsPull(F, d);
+    if (useful) res.push(d);
+  }
+  return res;
+}
+function computeHints(){
+  /* приоритет: 5 — в дом, 4 — вскрытие закрытой, 3 — из сброса / карта под дом,
+     2 — освобождение столбца под короля, 1 — подготовительное снятие из дома.
+     Холостые перетасовки (карта катается туда-обратно между равными местами)
+     не предлагаем никогда — именно они зацикливали подсказку */
+  const res = [];
+  const show = (c, z) => () => {
+    c.el.classList.add('hint');
+    if (z) zoneEl(z).classList.add('hint');
+  };
+  /* 1) в дома */
+  const tops = [];
+  P.tab.forEach((col, i) => { if (col.length) tops.push({ c: col[col.length - 1], loc: { t: 'tab', i } }); });
+  if (P.waste.length) tops.push({ c: P.waste[P.waste.length - 1], loc: { t: 'waste', i: 0 } });
+  tops.forEach(({ c, loc }) => {
+    for (let i = 0; i < 4; i++){
+      if (canDropFound(c, i)){
+        /* не откатываем только что подсказанное снятие этой карты из дома i */
+        if (lastHint && lastHint.id === c.id && lastHint.from === 'f' + i &&
+            loc.t === 'tab' && loc.i === lastHint.toT) continue;
+        res.push({ key: `f${c.id}>${i}`, prio: 5, id: c.id,
+                   from: loc.t === 'tab' ? 't' + loc.i : 'w', to: 'f' + i,
+                   fromT: loc.t === 'tab' ? loc.i : -1, toT: -1,
+                   run: show(c, { t: 'found', i }) });
+        break;
+      }
+    }
+  });
+  /* 2) между столбцами — только «продуктивные» переносы:
+        • открывается закрытая карта;
+        • освободившаяся карта сразу ложится в дом;
+        • освобождается столбец, когда королю есть куда встать.
+     Перенос ради переноса (6♥ с чёрной 7 на другую чёрную 7) не предлагаем */
+  const kingWantsSpot = kingWantsSpotNow();
+  for (let i = 0; i < 7; i++){
+    const col = P.tab[i];
+    for (let k = 0; k < col.length; k++){
+      if (!col[k].up) continue;
+      const lead = col[k];
+      const reveals = k > 0 && !col[k - 1].up;               // под ней закрытая карта
+      const below = k > 0 ? col[k - 1] : null;
+      let belowToFound = false;                              // освободившаяся карта готова в дом
+      if (below && below.up){
+        for (let f = 0; f < 4; f++) if (canDropFound(below, f)){ belowToFound = true; break; }
+      }
+      const freesForKing = k === 0 && kingWantsSpot;         // освободится столбец для короля
+      if (!reveals && !belowToFound && !freesForKing) continue;
+      for (let d = 0; d < 7; d++){
+        if (d === i || !canDropTab(lead, d)) continue;
+        if (!P.tab[d].length && k === 0) continue;           // холостой перенос короля «с пустого на пустое»
+        const to = 't' + d;
+        /* не откатываем только что подсказанный ход: ни ту же карту обратно,
+           ни обратный рейс по той же паре стопок (сериями с другой головой) */
+        if (lastHint && ((lastHint.id === lead.id && to === lastHint.from) ||
+                         (lastHint.toT === i && lastHint.fromT === d))) continue;
+        res.push({ key: `t${lead.id}>${d}`, prio: reveals ? 4 : (belowToFound ? 3 : 2),
+                   id: lead.id, from: 't' + i, to, fromT: i, toT: d, run: show(lead, { t: 'tab', i: d }) });
+      }
+    }
+  }
+  /* 3) из сброса в столбец */
+  if (P.waste.length){
+    const c = P.waste[P.waste.length - 1];
+    for (let d = 0; d < 7; d++) if (canDropTab(c, d))
+      res.push({ key: `w${c.id}>${d}`, prio: 3, id: c.id, from: 'w', to: 't' + d, fromT: -1, toT: -1,
+                 run: show(c, { t: 'tab', i: d }) });
+  }
+  /* 4) подготовительный ход: снять карту из дома на столбец, чтобы под неё
+        потом легла карта из колоды/сброса либо продуктивная серия столбца.
+        Обратные ходы «дом → стол» — часть решения, а не откат */
+  for (let fi = 0; fi < 4; fi++){
+    const f = P.found[fi];
+    if (!f.length) continue;
+    const F = f[f.length - 1];
+    const cols = pullDownColumns(F);
+    if (!cols.length) continue;
+    const d = cols[0];
+    /* не откатываем только что подсказанный возврат этой карты в дом fi */
+    if (lastHint && lastHint.id === F.id && lastHint.to === 'f' + fi && lastHint.fromT === d) continue;
+    res.push({ key: `p${F.id}>${d}`, prio: 1, id: F.id, from: 'f' + fi, to: 't' + d,
+               fromT: -1, toT: d,
+               run: () => { show(F, { t: 'tab', i: d })(); toast('Снимите карту из дома на столбец'); } });
+  }
+  res.sort((a, b) => b.prio - a.prio);
+  return res;
+}
+function showHint(){
+  if (busy || won) return;
+  clearHintEls();
+  if (hintVer !== version){ hintVer = version; hintShown = []; }  // ситуация изменилась — цикл заново
+  const cands = computeHints();
+  const stockHint = () => {
+    slots.stock.classList.add('hint');
+    toast(P.stock.length ? 'Возьмите карты из колоды' : 'Переверните сброс в колоду');
+  };
+  const run = h => {
+    hintShown.push(h.key);                          // каждый раз — новый ход, без зацикливания
+    lastHint = { id: h.id, from: h.from, to: h.to,
+                 fromT: h.fromT, toT: h.toT };     // чтобы следующий совет не откатывал этот
+    h.run();
+  };
+  const fresh = cands.find(h => !hintShown.includes(h.key) && h.prio > 1);   // прямые ходы
+  if (fresh){
+    run(fresh);
+  } else if (deckHasMoves()){
+    /* прямых ходов нет, но просчитан весь цикл сдачи с пересдачами:
+       если хоть одна карта, которая РЕАЛЬНО всплывёт верхней в сбросе,
+       имеет куда лечь — ведём к колоде, а не объявляем «ходов нет» раньше
+       времени; карты из середины партий «по 3» не всплывут и не считаются */
+    stockHint();
+  } else {
+    const pull = cands.find(h => !hintShown.includes(h.key));  // подготовки: дом → столбец
+    if (pull){
+      run(pull);
+    } else if (!cands.length){
+      /* проверены столбцы, дома, подготовительные ходы и весь цикл сдачи —
+         ходов действительно нет */
+      toast('Ходов нет');
+    } else {
+      toast('Других подсказок нет — отмените ход или пересдайте');
+    }
+  }
+  hintTimer = setTimeout(clearHintEls, 2600);
+}
+
+/* ---------- Автозавершение ---------- */
+function autoPossible(){
+  if (won || busy) return false;
+  if (P.stock.length || P.waste.length) return false;
+  if (!P.tab.some(col => col.length)) return false;
+  return P.tab.every(col => col.every(c => c.up));     // все карты открыты и всё в столбцах
+}
+function updateAuto(){ btnAuto.classList.toggle('show', autoPossible()); }
+async function autoFinish(){
+  if (!autoPossible() || busy) return;
+  busy = true; btnAuto.classList.remove('show');
+  autoFast = true;                                     // карты летят в дома быстро
+  try {
+    for (;;){
+      let best = null;
+      for (let i = 0; i < 7; i++){
+        const col = P.tab[i];
+        if (!col.length) continue;
+        const c = col[col.length - 1];
+        for (let f = 0; f < 4; f++){
+          if (canDropFound(c, f)){
+            if (!best || c.r < best.c.r) best = { c, i, f };
+            break;
+          }
+        }
+      }
+      if (!best) break;
+      doMove({ t: 'tab', i: best.i }, [best.c], { t: 'found', i: best.f });
+      await sleep(55);
+    }
+  } finally {
+    busy = false; autoFast = false; checkWin(); updateAuto();
+  }
+}
+
+/* ---------- Победа и конфетти ---------- */
+function checkWin(){
+  if (won) return;
+  if (P.found.reduce((s, f) => s + f.length, 0) !== 52) return;
+  won = true;
+  addWin();
+  const bonus = secs > 0 ? Math.min(30000, Math.round(700000 / Math.max(secs, 30))) : 0;
+  score += bonus; updateHUD();
+  $('#w-time').textContent = fmtTime(secs);
+  $('#w-moves').textContent = moves;
+  $('#w-score').textContent = score + (bonus ? ` (+${bonus})` : '');
+  sfx.win();
+  confetti();
+  setTimeout(() => showOverlay('#ov-win'), 700);
+}
+const fx = $('#fx'), fctx = fx.getContext('2d');
+let fxRun = false;
+/* полная остановка конфетти: глушим цикл И стираем канвас —
+   иначе при старте новой партии последний кадр застывает на экране */
+function stopConfetti(){
+  fxRun = false;
+  fctx.save();
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.clearRect(0, 0, fx.width, fx.height);
+  fctx.restore();
+}
+function confetti(){
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  fx.width = innerWidth * dpr; fx.height = innerHeight * dpr;
+  fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const colors = ['#e34b4f', '#f4c04f', '#3fae6a', '#3f8cff', '#b06ee8', '#ffffff'];
+  const parts = Array.from({ length: 150 }, () => ({
+    x: Math.random() * innerWidth, y: -20 - Math.random() * innerHeight * .5,
+    vx: (Math.random() - .5) * 2.2, vy: 2 + Math.random() * 3.5,
+    w: 6 + Math.random() * 7, h: 8 + Math.random() * 10,
+    a: Math.random() * Math.PI, va: (Math.random() - .5) * .25,
+    c: colors[(Math.random() * colors.length) | 0]
+  }));
+  fxRun = true;
+  let last = performance.now();
+  (function loop(now){
+    if (!fxRun) return;
+    const dt = Math.min(2.5, (now - last) / 16.7); last = now;
+    fctx.clearRect(0, 0, innerWidth, innerHeight);
+    let alive = 0;
+    for (const p of parts){
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += .03 * dt; p.a += p.va * dt;
+      if (p.y < innerHeight + 30) alive++;
+      fctx.save(); fctx.translate(p.x, p.y); fctx.rotate(p.a);
+      fctx.fillStyle = p.c; fctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      fctx.restore();
+    }
+    if (alive) requestAnimationFrame(loop);
+    else fxRun = false;
+  })(performance.now());
+}
+
+/* ---------- Оверлеи и тост ---------- */
+function anyOverlay(){ return !!document.querySelector('.overlay.show'); }
+function showOverlay(sel){ $(sel).classList.add('show'); }
+function hideOverlays(){ document.querySelectorAll('.overlay.show').forEach(o => o.classList.remove('show')); }
+let toastT = null;
+function toast(msg){
+  if (!msg) return;
+  toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => toastEl.classList.remove('show'), 2000);
+}
+
+/* ---------- Новая игра и анимация раздачи ---------- */
+/* ---------- Генератор решаемых раздач ----------
+   Лёгкая модель правил (та же сдача и те же ходы, что в игре) + жадный бот:
+   если бот доиграл до победы — раскладка гарантированно решаема,
+   его линия и есть решение. Не решил — берём следующий случайный шафл. */
+function simWin(ids, mode){
+  const tab = [[],[],[],[],[],[],[]];
+  let p = 0;
+  for (let r = 0; r < 7; r++) for (let c = r; c < 7; c++) tab[c].push(ids[p++]);
+  const down = tab.map(col => col.length - 1);        // закрытая префикс-часть каждой колонки
+  const stock = ids.slice(28);                        // pop() берёт верхнюю — как в игре
+  const waste = [];
+  const found = [0, 0, 0, 0];
+  const RED = s => s === 1 || s === 2;
+  let recycles = 0, guard = 0;
+
+  for (;;){
+    if (++guard > 1600) return false;
+    if (found[0] + found[1] + found[2] + found[3] === 52) return true;
+
+    /* 1) верх сброса → дом */
+    if (waste.length){
+      const t = waste[waste.length - 1];
+      if (CARDS[t].r === found[CARDS[t].s] + 1){ waste.pop(); found[CARDS[t].s]++; continue; }
+    }
+    /* 2) верх колонки → дом */
+    let did = false;
+    for (let i = 0; i < 7 && !did; i++){
+      if (!tab[i].length) continue;
+      const t = tab[i][tab[i].length - 1];
+      if (CARDS[t].r === found[CARDS[t].s] + 1){
+        found[CARDS[t].s]++; tab[i].pop();
+        if (down[i] > 0 && down[i] === tab[i].length) down[i]--;   // вскрыли следующую
+        did = true;
+      }
+    }
+    if (did) continue;
+    /* 3) перенос открытого блока, вскрывающий закрытую карту */
+    let mv = null;
+    for (let i = 0; i < 7 && !mv; i++){
+      if (down[i] === 0 || !tab[i].length) continue;
+      const lead = tab[i][down[i]];
+      for (let t = 0; t < 7; t++){
+        if (t === i) continue;
+        const dt = tab[t];
+        const ok = dt.length
+          ? CARDS[dt[dt.length - 1]].r === CARDS[lead].r + 1 && RED(CARDS[dt[dt.length - 1]].s) !== RED(CARDS[lead].s)
+          : CARDS[lead].r === 13;
+        if (ok){ mv = [i, t]; break; }
+      }
+    }
+    if (mv){
+      const blk = tab[mv[0]].splice(down[mv[0]]);
+      tab[mv[1]].push.apply(tab[mv[1]], blk);
+      down[mv[0]]--;
+      continue;
+    }
+    /* 4) вся колонка открыта → уводим её целиком, освобождая место */
+    for (let i = 0; i < 7 && !mv; i++){
+      if (down[i] !== 0 || tab[i].length < 2) continue;
+      const lead = tab[i][0];
+      if (CARDS[lead].r === 13) continue;              // король уходит только в пустоту — смысла нет
+      for (let t = 0; t < 7; t++){
+        if (t === i || !tab[t].length) continue;
+        const top = tab[t][tab[t].length - 1];
+        if (CARDS[top].r === CARDS[lead].r + 1 && RED(CARDS[top].s) !== RED(CARDS[lead].s)){ mv = [i, t]; break; }
+      }
+    }
+    if (mv){
+      const blk = tab[mv[0]].splice(0);
+      tab[mv[1]].push.apply(tab[mv[1]], blk);
+      continue;
+    }
+    /* 5) карта из сброса на подходящее место в колонке */
+    if (waste.length){
+      const w = waste[waste.length - 1], wc = CARDS[w];
+      let placed = false;
+      for (let t = 0; t < 7 && !placed; t++){
+        const dt = tab[t];
+        const ok = dt.length
+          ? CARDS[dt[dt.length - 1]].r === wc.r + 1 && RED(CARDS[dt[dt.length - 1]].s) !== RED(wc.s)
+          : wc.r === 13;
+        if (ok){ tab[t].push(waste.pop()); placed = true; }
+      }
+      if (placed) continue;
+    }
+    /* 6) сдаём из колоды / переворачиваем сброс */
+    if (!stock.length){
+      if (!waste.length) return false;                 // ходов действительно нет
+      if (++recycles > 60) return false;
+      while (waste.length) stock.push(waste.pop());    // как в игре: старые карты выходят первыми
+      continue;
+    }
+    const n2 = Math.min(mode, stock.length);
+    for (let k = 0; k < n2; k++) waste.push(stock.pop());
+  }
+}
+function genWinnable(mode){
+  const base = Object.keys(CARDS).map(Number);
+  /* «по три» решаются реже — даём боту больше попыток и времени */
+  const budget = mode === 3 ? 1500 : 600;
+  const maxTries = mode === 3 ? 900 : 400;
+  const deadline = performance.now() + budget;
+  let tries = 0;
+  while (tries++ < maxTries && performance.now() < deadline){
+    const ids = base.slice();
+    for (let i = ids.length - 1; i > 0; i--){
+      const j = (Math.random() * (i + 1)) | 0;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    if (simWin(ids, mode)) return ids;
+  }
+  return null;                                        // не подобрали — будет обычная случайная раздача
+}
+
+function startGame(deal){
+  if (busy) return;
+  /* прежняя партия с ходами считается сыгранной (победы уже учтены отдельно) */
+  if (moves > 0 && !gameCounted) countGame();
+  gameCounted = false;
+  store.setItem('klond_time', totalSecs);
+  P.stock.length = 0; P.waste.length = 0;
+  P.found.forEach(f => f.length = 0); P.tab.forEach(t => t.length = 0);
+  P.batch = 0;
+  history.length = 0; btnUndo.disabled = true;
+  moves = 0; score = 0; secs = 0; started = false; won = false; version++;
+  hintReset(); stopConfetti();
+  stTime.textContent = '00:00';
+  hideOverlays(); showBoard(); updateHUD(); updateAuto(); clearHintEls();
+
+  /* раздача: та же (переигрывание), решаемая (подбирается ботом) или чисто случайная */
+  let ids = null;
+  if (deal && Array.isArray(deal.ids) && deal.ids.length === 52){
+    MODE = deal.mode || MODE; store.setItem('klond_mode', MODE);
+    syncHomeStats();
+    ids = deal.ids.slice();
+  }
+  if (!ids) ids = winnable ? genWinnable(MODE) : null;
+  if (!ids){
+    /* тасование Фишера—Йетса */
+    ids = Object.keys(CARDS).map(Number);
+    for (let i = ids.length - 1; i > 0; i--){
+      const j = (Math.random() * (i + 1)) | 0;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+  }
+  /* ВАЖНО: все карты новой партии начинаются закрытыми —
+     иначе «up» из прошлой игры протекает в середины колонок */
+  ids.forEach(id => { CARDS[id].up = false; });
+  /* классическая раздача: столбец c получает c+1 карт, верхняя открыта */
+  let p = 0;
+  for (let r = 0; r < 7; r++) for (let c = r; c < 7; c++) P.tab[c].push(CARDS[ids[p++]]);
+  P.tab.forEach(col => col[col.length - 1].up = true);
+  for (; p < 52; p++){ const c = CARDS[ids[p]]; c.up = false; P.stock.push(c); }
+  lastDeal = { ids: ids.slice(), mode: MODE };        // запоминаем расклад для «Переиграть партию»
+
+  audioInit();                       // на случай старта с клавиатуры: контекст создаём в жесте
+  busy = true;
+  computeLayout();
+
+  /* все карты стартуют из колоды */
+  Object.values(CARDS).forEach(c => {
+    c.x = L.stockX; c.y = L.topY; c.rot = 180; c.sc = 1; c.boost = 0; c.z = 0;
+    paint(c); c.el.style.zIndex = 0;
+  });
+  layoutPile('stock', 0, false);
+
+  /* раздача рядами через requestAnimationFrame со ступенчатой задержкой */
+  const seq = [];
+  for (let r = 0; r < 7; r++) for (let c = r; c < 7; c++) seq.push({ c: P.tab[c][r], ti: c, j: r });
+  const flights = seq.map((it, n) => new Promise(res => {
+    setTimeout(() => {
+      const o = tabOffsets(P.tab[it.ti]);
+      let y = L.tabY;
+      for (let k = 0; k < it.j; k++) y += P.tab[it.ti][k].up ? o.u : o.d;
+      it.c.boost = 2500 + n; applyZ(it.c);
+      /* упрощённая раздача: карта выезжает из колоды сразу в финальной
+         стороне (лицом/рубашкой), без анимации переворота */
+      const rot = it.c.up ? 0 : 180;
+      it.c.rot = rot; paint(it.c);
+      animateCard(it.c, L.colX(it.ti), y, rot, 180, { ease: Ease.outCubic })
+        .then(() => { it.c.z = it.j; applyZ(it.c);
+          /* если меню открыто поверх (партия спрятана) — раздача проходит беззвучно */
+          if (!board.classList.contains('bare')) sfx.deal(n);
+          res(); });
+    }, 80 + n * 30);
+  }));
+  Promise.all(flights).then(() => {
+    layoutAll(false);
+    busy = false; updateHUD(); updateAuto();
+  });
+}
+
+/* ---------- Привязка кнопок и событий ---------- */
+$('#btn-home').addEventListener('click', openMenu);
+/* «Продолжить»: возвращаем партию; если партии ещё нет (первый запуск) — играем */
+$('#m-close').addEventListener('click', () => {
+  hideOverlays();
+  if (hasGame()) showBoard(); else startGame();
+});
+$('#m-rules').addEventListener('click', () => $('#rules').classList.toggle('open'));
+/* выбор режима на домашнем экране: дожидаемся конца текущей раздачи,
+   чтобы новая партия точно началась (меню открыто и поверх идущей сдачи) */
+function newGame(mode){
+  MODE = mode; store.setItem('klond_mode', mode);
+  hideOverlays();
+  (function go(){ if (busy) return setTimeout(go, 60); startGame(); })();
+}
+$('#m-new1').addEventListener('click', () => newGame(1));
+$('#m-new3').addEventListener('click', () => newGame(3));
+function syncWinnable(){
+  const w = $('#w-state');
+  w.textContent = winnable ? 'вкл' : 'выкл';
+  w.classList.toggle('off', !winnable);
+}
+$('#m-winnable').addEventListener('click', () => {
+  winnable = !winnable;
+  store.setItem('klond_winnable', winnable ? '1' : '0');
+  syncWinnable();
+});
+$('#btn-redeal').addEventListener('click', () => {
+  if (busy) return;
+  if (moves > 0 && !won) showOverlay('#ov-confirm'); else startGame();
+});
+/* «Переиграть партию» — та же раздача; «Новая партия» — свежая раздача */
+$('#c-replay').addEventListener('click', () => { hideOverlays(); startGame(lastDeal); });
+$('#c-new').addEventListener('click', () => { hideOverlays(); startGame(); });
+$('#c-no').addEventListener('click', hideOverlays);
+$('#w-again').addEventListener('click', () => { hideOverlays(); startGame(); });
+$('#w-menu').addEventListener('click', () => { hideOverlays(); openMenu(); });
+$('#btn-undo').addEventListener('click', undo);
+$('#btn-hint').addEventListener('click', showHint);
+$('#btn-auto').addEventListener('click', autoFinish);
+function syncSoundIcon(){
+  $('#ic-son').style.display = muted ? 'none' : '';
+  $('#ic-soff').style.display = muted ? '' : 'none';
+}
+$('#btn-sound').addEventListener('click', () => {
+  muted = !muted;
+  store.setItem('klond_mute', muted ? '1' : '0');
+  syncSoundIcon(); audioInit();
+  if (!muted) sfx.flip();
+});
+
+board.addEventListener('pointerdown', onDown);
+window.addEventListener('pointermove', onMove, { passive: false });
+window.addEventListener('pointerup', onUp);
+window.addEventListener('pointercancel', onUp);
+board.addEventListener('contextmenu', e => e.preventDefault());
+
+/* при изменении размеров окна пересчитываем сетку и расставляем карты */
+let rsT = null;
+window.addEventListener('resize', () => {
+  clearTimeout(rsT);
+  rsT = setTimeout(() => {
+    drag = null;
+    document.querySelectorAll('.drag, .dropok').forEach(el => el.classList.remove('drag', 'dropok'));
+    computeLayout();
+    Object.values(CARDS).forEach(c => { c.sc = 1; c.boost = 0; });
+    layoutAll(false);
+  }, 120);
+});
+
+/* ---------- Инициализация ---------- */
+buildSlots();
+buildCards();
+buildHomeFan();
+computeLayout();
+syncSoundIcon();
+updateHUD();
+/* При запуске никакой раздачи НЕ делаем: домашний экран показывается
+   на чистом фоне. Партия начнётся, когда игрок выберет режим или
+   нажмёт «Играть» — так на старте нет ни анимации, ни звуков */
+openMenu();
+syncWinnable();
+
+/* отладочный доступ (не мешает игре) */
+window.KLOND = { P, L, draw: drawOrRecycle, hint: showHint, hints: computeHints,
+                 move: doMove, relayout: () => layoutAll(false), resetHints: hintReset,
+                 deckMoves: deckHasMoves, pullCols: pullDownColumns,
+                 tops: reachableTops, setMode: v => { MODE = v; }, isBusy: () => busy,
+                 lastDeal: () => lastDeal, start: startGame, win: checkWin };
+</script>
+</body>
+</html>
